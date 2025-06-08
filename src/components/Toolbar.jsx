@@ -15,56 +15,62 @@ const TOOL_GROUPS = [
   {
     name: 'Basic',
     tools: [
-      { id: TOOLS.PENCIL, icon: FaPencilAlt, label: 'Pencil' },
-      { id: TOOLS.ERASER, icon: FaEraser, label: 'Eraser' },
-      { id: TOOLS.FILL, icon: FaFillDrip, label: 'Fill Bucket' },
-      { id: TOOLS.EYEDROPPER, icon: FaEyeDropper, label: 'Color Picker' }
+      { id: TOOLS.PENCIL, icon: FaPencilAlt, label: 'Pencil', shortcut: 'P' },
+      { id: TOOLS.ERASER, icon: FaEraser, label: 'Eraser', shortcut: 'E' },
+      { id: TOOLS.FILL, icon: FaFillDrip, label: 'Fill', shortcut: 'G' },
+      { id: TOOLS.EYEDROPPER, icon: FaEyeDropper, label: 'Picker', shortcut: 'I' }
     ]
   },
   {
     name: 'Shapes',
     tools: [
-      { id: TOOLS.LINE, icon: FaSlash, label: 'Line' },
-      { id: TOOLS.RECTANGLE, icon: FaSquare, label: 'Rectangle' },
-      { id: TOOLS.CIRCLE, icon: FaCircle, label: 'Circle' }
+      { id: TOOLS.LINE, icon: FaSlash, label: 'Line', shortcut: 'L' },
+      { id: TOOLS.RECTANGLE, icon: FaSquare, label: 'Rect', shortcut: 'R' },
+      { id: TOOLS.CIRCLE, icon: FaCircle, label: 'Circle', shortcut: 'C' }
     ]
   },
   {
     name: 'View',
     tools: [
-      { id: TOOLS.PAN, icon: FaHandPaper, label: 'Pan' }
+      { id: TOOLS.PAN, icon: FaHandPaper, label: 'Pan', shortcut: 'H' }
     ]
   }
 ]
 
 const Toolbar = ({ currentTool, onToolSelect }) => {
   return (
-    <div className="flex flex-col gap-4 p-2 bg-neutral-800 rounded-lg shadow-lg">
+    <nav className="flex flex-col gap-4 py-4 px-2 bg-neutral-900 rounded-xl shadow-2xl border border-neutral-800 items-center w-16 min-h-0" aria-label="Toolbar">
       {TOOL_GROUPS.map(group => (
-        <div key={group.name} className="flex flex-col gap-2">
-          <h3 className="text-xs font-semibold text-neutral-400 px-2">{group.name}</h3>
-          <div className="flex flex-col gap-2">
-            {group.tools.map(({ id, icon: Icon, label }) => (
+        <div key={group.name} className="flex flex-col gap-2 items-center">
+          {group.tools.map(({ id, icon: Icon, label, shortcut }) => {
+            const isActive = currentTool === id
+            return (
               <button
                 key={id}
-                className={`p-2 rounded transition-all relative group flex items-center justify-center ${
-                  currentTool === id
-                    ? 'bg-neutral-700 ring-2 ring-cyan-400 text-cyan-300'
-                    : 'bg-neutral-900 hover:bg-neutral-700 text-gray-300'
+                className={`group relative flex items-center justify-center w-10 h-10 rounded-lg transition-all focus:outline-none ${
+                  isActive ? 'bg-neutral-800 text-cyan-400' : 'bg-neutral-900 text-gray-400 hover:bg-neutral-800 hover:text-cyan-300'
                 }`}
                 onClick={() => onToolSelect(id)}
-                type="button"
+                aria-label={`${label} (${shortcut})`}
+                aria-pressed={isActive}
+                tabIndex={0}
               >
                 <Icon className="w-6 h-6" />
-                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 text-xs text-gray-100 bg-neutral-900 shadow-lg rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 border border-neutral-700">
-                  {label}
+                {/* Glowing dot indicator for active tool */}
+                {isActive && (
+                  <span className="absolute -left-2 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-cyan-400 shadow-cyan-400/50 shadow-md animate-pulse" />
+                )}
+                {/* Tooltip */}
+                <span className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 px-3 py-2 text-xs text-white bg-neutral-800 shadow-xl rounded opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-all duration-200 whitespace-nowrap z-10 border border-neutral-700">
+                  <span className="font-bold">{label}</span>
+                  <span className="ml-2 text-cyan-300 font-mono">[{shortcut}]</span>
                 </span>
               </button>
-            ))}
-          </div>
+            )
+          })}
         </div>
       ))}
-    </div>
+    </nav>
   )
 }
 

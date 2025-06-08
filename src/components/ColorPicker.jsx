@@ -7,10 +7,8 @@ const DEFAULT_COLORS = [
   '#000000', '#404040', '#808080', '#c0c0c0', '#ffffff'
 ];
 
-const ColorPicker = ({ onColorSelect, pixelData, currentTool, toolOptions, onToolOptionsChange }) => {
+const ColorPicker = ({ onColorSelect, pixelData, currentTool, toolOptions, onToolOptionsChange, leftColor, rightColor }) => {
   const [showColorModal, setShowColorModal] = useState(false);
-  const [leftColor, setLeftColor] = useState('#ff0000');
-  const [rightColor, setRightColor] = useState('#0000ff');
   const [activeColors, setActiveColors] = useState(['#ff0000', '#00ff00', '#0000ff']);
 
   useEffect(() => {
@@ -27,13 +25,7 @@ const ColorPicker = ({ onColorSelect, pixelData, currentTool, toolOptions, onToo
 
   const handleColorChange = (e, isRightClick = false) => {
     const color = e.target.value;
-    if (isRightClick) {
-      setRightColor(color);
-      onColorSelect(color, 'right');
-    } else {
-      setLeftColor(color);
-      onColorSelect(color, 'left');
-    }
+    onColorSelect(color, isRightClick ? 'right' : 'left');
   };
 
   const handleAddColor = () => {
@@ -46,11 +38,6 @@ const ColorPicker = ({ onColorSelect, pixelData, currentTool, toolOptions, onToo
 
   const handleColorSelect = (color, button) => {
     onColorSelect(color, button);
-    if (button === 'left') {
-      setLeftColor(color);
-    } else {
-      setRightColor(color);
-    }
     if (!activeColors.includes(color)) {
       setActiveColors(prev => [...prev, color]);
     }
