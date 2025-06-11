@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { drawLine, drawRectangle, drawCircle, floodFill } from '../utils/drawing'
 
 export const useDrawingTools = (spriteSize, pixelData, setPixelData) => {
@@ -8,6 +8,32 @@ export const useDrawingTools = (spriteSize, pixelData, setPixelData) => {
   const [rectPreview, setRectPreview] = useState(null)
   const [circleStart, setCircleStart] = useState(null)
   const [circlePreview, setCirclePreview] = useState(null)
+  const lastPencilPixel = useRef(null)
+
+  // Interpolated pencil draw
+  const drawPencilLine = (x0, y0, x1, y1, color) => {
+    setPixelData(prev => {
+      const updated = prev.map(row => [...row])
+      // Bresenham's line algorithm
+      let dx = Math.abs(x1 - x0)
+      let dy = Math.abs(y1 - y0)
+      let sx = x0 < x1 ? 1 : -1
+      let sy = y0 < y1 ? 1 : -1
+      let err = dx - dy
+      let x = x0
+      let y = y0
+      while (true) {
+        if (x >= 0 && x < updated[0].length && y >= 0 && y < updated.length) {
+          updated[y][x] = color
+        }
+        if (x === x1 && y === y1) break
+        const e2 = 2 * err
+        if (e2 > -dy) { err -= dy; x += sx }
+        if (e2 < dx) { err += dx; y += sy }
+      }
+      return updated
+    })
+  }
 
   const handleMouseDown = useCallback((e, tool, color, toolOptions) => {
     const rect = e.target.getBoundingClientRect()
@@ -24,6 +50,7 @@ export const useDrawingTools = (spriteSize, pixelData, setPixelData) => {
           updated[y][x] = color
           return updated
         })
+        lastPencilPixel.current = { x, y }
         break
       case 'LINE':
         setLineStart({ x, y, color })
@@ -45,7 +72,7 @@ export const useDrawingTools = (spriteSize, pixelData, setPixelData) => {
     }
   }, [spriteSize, pixelData, setPixelData])
 
-  const handleMouseMove = useCallback((e, tool, toolOptions) => {
+  const handleMouseMove = useCallback((e, tool, color, toolOptions) => {
     if (!e.buttons) return // Only handle if a mouse button is pressed
 
     const rect = e.target.getBoundingClientRect()
@@ -57,11 +84,10 @@ export const useDrawingTools = (spriteSize, pixelData, setPixelData) => {
 
     switch (tool) {
       case 'PENCIL':
-        setPixelData(prev => {
-          const updated = prev.map(row => [...row])
-          updated[y][x] = lineStart?.color || prev[y][x]
-          return updated
-        })
+        if (lastPencilPixel.current) {
+          drawPencilLine(lastPencilPixel.current.x, lastPencilPixel.current.y, x, y, color)
+        }
+        lastPencilPixel.current = { x, y }
         break
       case 'LINE':
         if (lineStart) {
@@ -92,6 +118,9 @@ export const useDrawingTools = (spriteSize, pixelData, setPixelData) => {
     if (x < 0 || x >= spriteSize.width || y < 0 || y >= spriteSize.height) return
 
     switch (tool) {
+      case 'PENCIL':
+        lastPencilPixel.current = null
+        break
       case 'LINE':
         if (lineStart) {
           drawLine(lineStart, { x, y }, lineStart.color, toolOptions, spriteSize, setPixelData)

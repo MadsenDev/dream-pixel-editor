@@ -1,17 +1,17 @@
 import { useEffect } from 'react'
 
-export function useToolShortcuts(setCurrentTool, KEYBOARD_SHORTCUTS) {
+export const useToolShortcuts = (setCurrentTool, shortcuts) => {
   useEffect(() => {
-    const handleKeyPress = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
-      const key = e.key.toLowerCase()
-      const tool = KEYBOARD_SHORTCUTS[key]
+    const handleKeyDown = (e) => {
+      // Tool shortcuts
+      const tool = shortcuts[e.key.toLowerCase()]
       if (tool) {
         e.preventDefault()
         setCurrentTool(tool)
       }
     }
-    window.addEventListener('keydown', handleKeyPress)
-    return () => window.removeEventListener('keydown', handleKeyPress)
-  }, [setCurrentTool, KEYBOARD_SHORTCUTS])
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [setCurrentTool, shortcuts])
 } 

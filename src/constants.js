@@ -7,7 +7,8 @@ export const TOOLS = {
   LINE: 'line',
   RECTANGLE: 'rectangle',
   RECTANGLE_FILLED: 'rectangle_filled',
-  CIRCLE: 'circle'
+  CIRCLE: 'circle',
+  MOVE_LAYER_CONTENT: 'move_layer_content'
 }
 
 export const PIXEL_SIZE = 32
@@ -20,10 +21,10 @@ export const DEFAULT_SPRITE_SIZE = {
 export const DEFAULT_SETTINGS = {
   gridWidth: 32,
   gridHeight: 32,
-  backgroundColor: '#ffffff',
-  gridColor: '#cccccc',
-  gridOpacity: 50,
-  defaultPixelSize: 32
+  backgroundColor: '#1f2937', // neutral-800
+  gridColor: '#0d9488', // cyan-600
+  gridOpacity: 30,
+  showGrid: true
 }
 
 export const DEFAULT_TOOL_OPTIONS = {

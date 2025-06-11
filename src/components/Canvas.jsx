@@ -22,7 +22,7 @@ const Canvas = ({
           onMouseUp={onMouseUp}
           onMouseLeave={onMouseLeave}
           onContextMenu={(e) => e.preventDefault()}
-          className="bg-white shadow-xl border border-neutral-700 w-full h-full object-contain"
+          className="bg-white shadow-xl border border-purple-700/30 w-full h-full object-contain"
           style={{
             width: '100%',
             height: '100%',

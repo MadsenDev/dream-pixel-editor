@@ -9,6 +9,12 @@ import { useDrawing } from './hooks/useDrawing'
 import { useCanvas } from './hooks/useCanvas'
 import Canvas from './components/Canvas'
 import { useToolShortcuts } from './hooks/useToolShortcuts'
+import LayersPanel from './components/LayersPanel'
+import Timeline from './components/Timeline'
+import Preview from './components/Preview'
+import { importPngToFrame } from './utils/importPng'
+import ImportModal from './components/ImportModal'
+import ExportModal from './components/ExportModal'
 
 // Keyboard shortcuts mapping
 const KEYBOARD_SHORTCUTS = {
@@ -20,6 +26,7 @@ const KEYBOARD_SHORTCUTS = {
   'r': TOOLS.RECTANGLE,
   'c': TOOLS.CIRCLE,
   'h': TOOLS.PAN,
+  'm': TOOLS.MOVE_LAYER_CONTENT,
 }
 
 function App() {
@@ -36,10 +43,47 @@ function App() {
   const [isImporting, setIsImporting] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [exportScale, setExportScale] = useState(1)
+  const [showOnionSkin, setShowOnionSkin] = useState(false)
 
+  // Animation: frames state
+  const [frames, setFrames] = useState([
+    {
+      id: 1,
+      name: 'Frame 1',
+      layers: [
+        {
+          id: 1,
+          name: 'Layer 1',
+          visible: true,
+          opacity: 1,
+          groupId: null,
+          pixels: Array(DEFAULT_SETTINGS.gridHeight).fill(null).map(() => Array(DEFAULT_SETTINGS.gridWidth).fill(null))
+        }
+      ],
+      layerIdCounter: 1,
+      nextGroupId: 1,
+      activeLayer: 0
+    }
+  ])
+  const [activeFrame, setActiveFrame] = useState(0)
+
+  // Helper: get current frame
+  const currentFrame = frames[activeFrame]
+  const layers = currentFrame.layers
+  const activeLayer = currentFrame.activeLayer
+  const nextGroupId = currentFrame.nextGroupId
+  const layerIdCounter = currentFrame.layerIdCounter
+
+  // Add back handleFramesChange
+  const handleFramesChange = (updater) => {
+    const newFrames = typeof updater === 'function' ? updater(frames) : updater
+    setFrames(newFrames)
+  }
+
+  // Drawing hook
   const {
-    pixelData,
-    setPixelData,
     isDrawing,
     setIsDrawing,
     lineStart,
@@ -60,20 +104,36 @@ function App() {
     drawLine,
     drawRectangle,
     drawCircle,
-    getPixelCoordinates
-  } = useDrawing(spriteSize, settings)
+    getPixelCoordinates,
+    lastPencilPixel,
+    drawPencilLine
+  } = useDrawing(
+    spriteSize,
+    settings,
+    frames[activeFrame].layers,
+    (updater) => {
+      const newFrames = [...frames]
+      newFrames[activeFrame] = {
+        ...newFrames[activeFrame],
+        layers: typeof updater === 'function' ? updater(newFrames[activeFrame].layers) : updater
+      }
+      handleFramesChange(newFrames)
+    },
+    activeLayer
+  )
 
   // Update sprite size when grid size changes
   useEffect(() => {
     setSpriteSize({ width: settings.gridWidth, height: settings.gridHeight })
-    setPixelData(Array(settings.gridHeight).fill(null).map(() => Array(settings.gridWidth).fill(null)))
   }, [settings.gridWidth, settings.gridHeight])
 
-  // Use useCanvas for all canvas drawing
+  // For useCanvas, pass showOnionSkin and previous frame's layers (if any)
+  const previousLayers = activeFrame > 0 ? frames[activeFrame - 1].layers : null
+
   useCanvas(
     canvasRef,
     spriteSize,
-    pixelData,
+    layers,
     zoom,
     pan,
     lineStart,
@@ -83,16 +143,54 @@ function App() {
     circleStart,
     circlePreview,
     toolOptions,
-    settings
+    settings,
+    showOnionSkin,
+    previousLayers
   )
 
   // Use the custom hook for keyboard shortcuts
   useToolShortcuts(setCurrentTool, KEYBOARD_SHORTCUTS)
 
+  // Move Layer Content: shift all pixels by dx, dy
+  const shiftLayerPixels = (dx, dy) => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      const oldPixels = frame.layers[activeLayer].pixels
+      const height = oldPixels.length
+      const width = oldPixels[0].length
+      const newPixels = Array(height).fill(null).map(() => Array(width).fill(null))
+      
+      // Copy pixels to their new positions
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const oldX = x - dx
+          const oldY = y - dy
+          if (oldX >= 0 && oldX < width && oldY >= 0 && oldY < height) {
+            newPixels[y][x] = oldPixels[oldY][oldX]
+          }
+        }
+      }
+      
+      return {
+        ...frame,
+        layers: frame.layers.map((layer, i) => 
+          i === activeLayer ? { ...layer, pixels: newPixels } : layer
+        )
+      }
+    }))
+  }
+
+  // Track drag state for move tool
+  const [moveStart, setMoveStart] = useState(null)
+
   const handleMouseDown = (e) => {
     if (currentTool === TOOLS.PAN) {
       setIsPanning(true)
       setLastPanPosition({ x: e.clientX, y: e.clientY })
+      return
+    }
+    if (currentTool === TOOLS.MOVE_LAYER_CONTENT) {
+      setMoveStart({ x: e.clientX, y: e.clientY })
       return
     }
 
@@ -109,11 +207,11 @@ function App() {
         paintPixel(x, y, null)
         break
       case TOOLS.FILL:
-        const targetColor = pixelData[y][x]
+        const targetColor = layers[activeLayer].pixels[y][x]
         floodFill(x, y, targetColor, color)
         break
       case TOOLS.EYEDROPPER:
-        const sampledColor = pixelData[y][x]
+        const sampledColor = layers[activeLayer].pixels[y][x]
         if (sampledColor) {
           if (e.button === 2) {
             setRightColor(sampledColor)
@@ -155,6 +253,15 @@ function App() {
       const dy = e.clientY - lastPanPosition.y
       setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }))
       setLastPanPosition({ x: e.clientX, y: e.clientY })
+      return
+    }
+    if (currentTool === TOOLS.MOVE_LAYER_CONTENT && moveStart) {
+      const dx = Math.round((e.clientX - moveStart.x) / (zoom * settings.defaultPixelSize))
+      const dy = Math.round((e.clientY - moveStart.y) / (zoom * settings.defaultPixelSize))
+      if (dx !== 0 || dy !== 0) {
+        shiftLayerPixels(dx, dy)
+        setMoveStart({ x: e.clientX, y: e.clientY })
+      }
       return
     }
 
@@ -220,6 +327,10 @@ function App() {
     if (currentTool === TOOLS.CIRCLE && circleStart && circlePreview) {
       drawCircle(circleStart, circlePreview, circleStart.color, toolOptions)
     }
+    if (currentTool === TOOLS.MOVE_LAYER_CONTENT && moveStart) {
+      setMoveStart(null)
+      return
+    }
     setLineStart(null)
     setLinePreview(null)
     setRectStart(null)
@@ -252,105 +363,548 @@ function App() {
   const handleFileImport = async (e) => {
     const file = e.target.files[0]
     if (!file) return
-
     setIsImporting(true)
-    const reader = new FileReader()
-    reader.onload = async (event) => {
-      try {
-        const img = new Image()
-        img.onload = () => {
-          // Create a temporary canvas to read pixel data
-          const tempCanvas = document.createElement('canvas')
-          const tempCtx = tempCanvas.getContext('2d')
-          tempCanvas.width = img.width
-          tempCanvas.height = img.height
-          
-          // Draw the image on the temporary canvas
-          tempCtx.drawImage(img, 0, 0)
-          
-          // Get pixel data
-          const imageData = tempCtx.getImageData(0, 0, img.width, img.height)
-          const data = imageData.data
-          
-          // Create new pixel data array
-          const newPixelData = Array(img.height).fill(null).map(() => Array(img.width).fill(null))
-          
-          // Convert RGBA data to hex colors
-          for (let y = 0; y < img.height; y++) {
-            for (let x = 0; x < img.width; x++) {
-              const idx = (y * img.width + x) * 4
-              const r = data[idx]
-              const g = data[idx + 1]
-              const b = data[idx + 2]
-              const a = data[idx + 3]
-              
-              // Only set pixel if it's not transparent
-              if (a > 0) {
-                const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
-                newPixelData[y][x] = hex
+    try {
+      const { frame, width, height } = await importPngToFrame(file)
+      setSpriteSize({ width, height })
+      setFrames(prev => [...prev, frame])
+      setActiveFrame(frames.length)
+      setIsImporting(false)
+    } catch (error) {
+      console.error('Error importing image:', error)
+      alert('Error importing image. Please make sure it\'s a valid image file.')
+      setIsImporting(false)
+    }
+  }
+
+  // Handler: Add Layer
+  const handleAddLayer = () => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      const newLayer = {
+        id: frame.layerIdCounter + 1,
+        name: `Layer ${frame.layers.length + 1}`,
+        visible: true,
+        opacity: 1,
+        groupId: null,
+        pixels: Array(settings.gridHeight).fill(null).map(() => Array(settings.gridWidth).fill(null))
+      }
+      return {
+        ...frame,
+        layers: [...frame.layers, newLayer],
+        layerIdCounter: frame.layerIdCounter + 1,
+        activeLayer: frame.layers.length
+      }
+    }))
+  }
+
+  // Handler: Delete Layer
+  const handleDeleteLayer = (idx) => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      if (frame.layers.length === 1) return frame
+      const newLayers = frame.layers.filter((_, i) => i !== idx)
+      let newActive = frame.activeLayer
+      if (frame.activeLayer === idx) newActive = 0
+      else if (frame.activeLayer > idx) newActive = frame.activeLayer - 1
+      return {
+        ...frame,
+        layers: newLayers,
+        activeLayer: newActive
+      }
+    }))
+  }
+
+  // Handler: Select Layer
+  const handleSelectLayer = (idx) => {
+    setFrames(prev => prev.map((frame, fidx) =>
+      fidx === activeFrame ? { ...frame, activeLayer: idx } : frame
+    ))
+  }
+
+  // Handler: Toggle Visibility
+  const handleToggleVisibility = (idx) => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      return {
+        ...frame,
+        layers: frame.layers.map((layer, i) => i === idx ? { ...layer, visible: !layer.visible } : layer)
+      }
+    }))
+  }
+
+  // Handler: Move Layer (now accepts fromIdx, toIdx)
+  const handleMoveLayer = (fromIdx, toIdxOrDirection) => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      let layers = [...frame.layers]
+      let toIdx = toIdxOrDirection
+      // Support old up/down direction for button usage
+      if (typeof toIdxOrDirection === 'string') {
+        if (toIdxOrDirection === 'up' && fromIdx > 0) toIdx = fromIdx - 1
+        else if (toIdxOrDirection === 'down' && fromIdx < layers.length - 1) toIdx = fromIdx + 1
+        else return frame
+      }
+      if (fromIdx === toIdx || toIdx < 0 || toIdx >= layers.length) return frame
+      const [moved] = layers.splice(fromIdx, 1)
+      layers.splice(toIdx, 0, moved)
+      let newActive = frame.activeLayer
+      if (frame.activeLayer === fromIdx) newActive = toIdx
+      else if (fromIdx < frame.activeLayer && toIdx >= frame.activeLayer) newActive = frame.activeLayer - 1
+      else if (fromIdx > frame.activeLayer && toIdx <= frame.activeLayer) newActive = frame.activeLayer + 1
+      return { ...frame, layers, activeLayer: newActive }
+    }))
+  }
+
+  // Handler: Duplicate Layer
+  const handleDuplicateLayer = (idx) => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      const newLayer = {
+        ...frame.layers[idx],
+        id: frame.layerIdCounter + 1,
+        name: `${frame.layers[idx].name} (copy)`,
+        pixels: frame.layers[idx].pixels.map(row => [...row])
+      }
+      return {
+        ...frame,
+        layers: [...frame.layers, newLayer],
+        layerIdCounter: frame.layerIdCounter + 1,
+        activeLayer: frame.layers.length
+      }
+    }))
+  }
+
+  // Handler: Rename Layer
+  const handleRenameLayer = (idx, newName) => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      return {
+        ...frame,
+        layers: frame.layers.map((layer, i) => i === idx ? { ...layer, name: newName } : layer)
+      }
+    }))
+  }
+
+  // Handler: Set Layer Opacity
+  const handleSetLayerOpacity = (idx, opacity) => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      return {
+        ...frame,
+        layers: frame.layers.map((layer, i) => i === idx ? { ...layer, opacity } : layer)
+      }
+    }))
+  }
+
+  // Handler: Create Group
+  const handleCreateGroup = () => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      const groupId = frame.nextGroupId
+      return {
+        ...frame,
+        nextGroupId: groupId + 1,
+        layers: frame.layers.map((layer, i) => i === frame.activeLayer ? { ...layer, groupId } : layer)
+      }
+    }))
+  }
+
+  // Handler: Add to Group
+  const handleAddToGroup = (idx, groupId) => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      return {
+        ...frame,
+        layers: frame.layers.map((layer, i) => i === idx ? { ...layer, groupId } : layer)
+      }
+    }))
+  }
+
+  // Handler: Remove from Group
+  const handleRemoveFromGroup = (idx) => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      return {
+        ...frame,
+        layers: frame.layers.map((layer, i) => i === idx ? { ...layer, groupId: null } : layer)
+      }
+    }))
+  }
+
+  // Handler: Merge Layers
+  const handleMergeLayers = (indices) => {
+    setFrames(prev => prev.map((frame, fidx) => {
+      if (fidx !== activeFrame) return frame
+      if (indices.length < 2) return frame
+      const newLayers = frame.layers.filter((_, i) => !indices.includes(i))
+      const mergedPixels = Array(settings.gridHeight).fill(null).map(() => Array(settings.gridWidth).fill(null))
+      indices.forEach(idx => {
+        const layer = frame.layers[idx]
+        for (let y = 0; y < settings.gridHeight; y++) {
+          for (let x = 0; x < settings.gridWidth; x++) {
+            if (layer.pixels[y][x]) {
+              mergedPixels[y][x] = layer.pixels[y][x]
+            }
+          }
+        }
+      })
+      const mergedLayer = {
+        id: frame.layerIdCounter + 1,
+        name: 'Merged Layer',
+        visible: true,
+        opacity: 1,
+        groupId: null,
+        pixels: mergedPixels
+      }
+      return {
+        ...frame,
+        layers: [...newLayers, mergedLayer],
+        layerIdCounter: frame.layerIdCounter + 1,
+        activeLayer: newLayers.length
+      }
+    }))
+  }
+
+  // Arrow key movement for move tool
+  useEffect(() => {
+    if (currentTool !== TOOLS.MOVE_LAYER_CONTENT) return
+    const handleArrow = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+      let dx = 0, dy = 0
+      if (e.key === 'ArrowLeft') dx = -1
+      if (e.key === 'ArrowRight') dx = 1
+      if (e.key === 'ArrowUp') dy = -1
+      if (e.key === 'ArrowDown') dy = 1
+      if (dx !== 0 || dy !== 0) {
+        e.preventDefault()
+        setFrames(prev => prev.map((frame, fidx) => {
+          if (fidx !== activeFrame) return frame
+          const oldPixels = frame.layers[frame.activeLayer].pixels
+          const height = oldPixels.length
+          const width = oldPixels[0].length
+          const newPixels = Array(height).fill(null).map(() => Array(width).fill(null))
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              const newX = x + dx
+              const newY = y + dy
+              if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
+                newPixels[newY][newX] = oldPixels[y][x]
               }
             }
           }
-          
-          // Update both states in a single batch
-          setSpriteSize({ width: img.width, height: img.height })
-          setPixelData(newPixelData)
-          setIsImporting(false)
-        }
-        
-        img.src = event.target.result
-      } catch (error) {
-        console.error('Error importing image:', error)
-        alert('Error importing image. Please make sure it\'s a valid image file.')
-        setIsImporting(false)
+          const newLayers = frame.layers.map((layer, idx) =>
+            idx === frame.activeLayer ? { ...layer, pixels: newPixels } : layer
+          )
+          return { ...frame, layers: newLayers }
+        }))
       }
     }
-    
-    reader.readAsDataURL(file)
+    window.addEventListener('keydown', handleArrow)
+    return () => window.removeEventListener('keydown', handleArrow)
+  }, [currentTool, activeLayer, activeFrame, frames])
+
+  // Export logic
+  const handleExport = () => {
+    setShowExportModal(true)
+  }
+
+  const doExport = ({ mode, scale, framesPerRow, exportAllFrames }) => {
+    const width = spriteSize.width
+    const height = spriteSize.height
+    const framesToExport = exportAllFrames ? frames : [frames[activeFrame]]
+
+    if (mode === 'single') {
+      // Export single frame
+      const canvas = document.createElement('canvas')
+      canvas.width = width * scale
+      canvas.height = height * scale
+      const ctx = canvas.getContext('2d')
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+      // Composite all visible layers in order
+      framesToExport[0].layers.forEach(layer => {
+        if (!layer.visible) return
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const color = layer.pixels[y][x]
+            if (color) {
+              // Parse rgba color
+              const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/)
+              if (rgba) {
+                const [_, r, g, b, a] = rgba
+                const alpha = layer.opacity * (a ? parseFloat(a) : 1)
+                ctx.globalAlpha = alpha
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`
+                ctx.fillRect(x * scale, y * scale, scale, scale)
+                ctx.globalAlpha = 1
+              }
+            }
+          }
+        }
+      })
+
+      // Download as PNG
+      canvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'pixel-art.png'
+        a.click()
+        URL.revokeObjectURL(url)
+      }, 'image/png')
+    } else {
+      // Export sprite sheet
+      const numFrames = framesToExport.length
+      const cols = Math.min(framesPerRow, numFrames)
+      const rows = Math.ceil(numFrames / cols)
+      const canvas = document.createElement('canvas')
+      canvas.width = width * cols * scale
+      canvas.height = height * rows * scale
+      const ctx = canvas.getContext('2d')
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+      // Draw each frame
+      framesToExport.forEach((frame, idx) => {
+        const col = idx % cols
+        const row = Math.floor(idx / cols)
+        const x = col * width * scale
+        const y = row * height * scale
+
+        // Composite all visible layers in order
+        frame.layers.forEach(layer => {
+          if (!layer.visible) return
+          for (let y2 = 0; y2 < height; y2++) {
+            for (let x2 = 0; x2 < width; x2++) {
+              const color = layer.pixels[y2][x2]
+              if (color) {
+                // Parse rgba color
+                const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/)
+                if (rgba) {
+                  const [_, r, g, b, a] = rgba
+                  const alpha = layer.opacity * (a ? parseFloat(a) : 1)
+                  ctx.globalAlpha = alpha
+                  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`
+                  ctx.fillRect(x + x2 * scale, y + y2 * scale, scale, scale)
+                  ctx.globalAlpha = 1
+                }
+              }
+            }
+          }
+        })
+      })
+
+      // Download as PNG
+      canvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'sprite-sheet.png'
+        a.click()
+        URL.revokeObjectURL(url)
+      }, 'image/png')
+    }
+
+    setShowExportModal(false)
+  }
+
+  // Frame handlers
+  const handleAddFrame = () => {
+    setFrames(prev => [
+      ...prev,
+      {
+        id: prev.length + 1,
+        name: `Frame ${prev.length + 1}`,
+        layers: [
+          {
+            id: 1,
+            name: 'Layer 1',
+            visible: true,
+            opacity: 1,
+            groupId: null,
+            pixels: Array(settings.gridHeight).fill(null).map(() => Array(settings.gridWidth).fill(null))
+          }
+        ],
+        layerIdCounter: 1,
+        nextGroupId: 1,
+        activeLayer: 0
+      }
+    ])
+    setActiveFrame(frames.length)
+  }
+  const handleDeleteFrame = (idx) => {
+    if (frames.length === 1) return
+    setFrames(prev => prev.filter((_, i) => i !== idx))
+    setActiveFrame(prev => prev === idx ? 0 : prev > idx ? prev - 1 : prev)
+  }
+  const handleDuplicateFrame = (idx) => {
+    setFrames(prev => [
+      ...prev,
+      {
+        ...prev[idx],
+        id: prev.length + 1,
+        name: `${prev[idx].name} (copy)`,
+        layers: prev[idx].layers.map(layer => ({
+          ...layer,
+          pixels: layer.pixels.map(row => [...row])
+        })),
+        layerIdCounter: prev[idx].layerIdCounter,
+        nextGroupId: prev[idx].nextGroupId,
+        activeLayer: prev[idx].activeLayer
+      }
+    ])
+    setActiveFrame(frames.length)
+  }
+  const handleSelectFrame = (idx) => setActiveFrame(idx)
+  const handleToggleOnionSkin = () => setShowOnionSkin(v => !v)
+  // Render a simple thumbnail (just a colored box for now)
+  const renderFrameThumbnail = (frame) => (
+    <div className="w-full h-full flex items-center justify-center bg-neutral-700 rounded">
+      <span className="text-xs text-cyan-200">{frame.name}</span>
+    </div>
+  )
+
+  // Handler for ImportModal (single image)
+  const handleImportFrame = ({ frame, width, height }) => {
+    setSpriteSize({ width, height })
+    setFrames([
+      {
+        ...frame,
+        id: 1,
+        name: 'Frame 1',
+        layers: frame.layers,
+        layerIdCounter: frame.layerIdCounter || 1,
+        nextGroupId: frame.nextGroupId || 1,
+        activeLayer: 0
+      }
+    ])
+    setActiveFrame(0)
+  }
+
+  // Handler for ImportModal (sprite sheet)
+  const handleImportFrames = ({ frames, width, height }) => {
+    setSpriteSize({ width, height })
+    setFrames(frames.map((frame, i) => ({
+      ...frame,
+      id: i + 1,
+      name: `Frame ${i + 1}`,
+      activeLayer: 0
+    })))
+    setActiveFrame(0)
+  }
+
+  const handleToolOptionsChange = (newOptions) => {
+    setToolOptions(newOptions)
   }
 
   return (
-    <div className="h-screen flex flex-col bg-neutral-900">
-      <Header
-        isImporting={isImporting}
-        onImport={handleFileImport}
-        onSettingsClick={() => setShowSettings(true)}
-      />
-
-      {/* Main Content */}
-      <div className="flex-1 grid grid-cols-[80px,300px,1fr] gap-4 p-4 overflow-hidden">
-        {/* Toolbar */}
-        <Toolbar currentTool={currentTool} onToolSelect={setCurrentTool} />
-
-        {/* Color Picker */}
-        <ColorPicker 
-          onColorSelect={handleColorSelect} 
-          pixelData={pixelData}
-          currentTool={currentTool}
-          toolOptions={toolOptions}
-          onToolOptionsChange={setToolOptions}
-          leftColor={leftColor}
-          rightColor={rightColor}
+    <div className="w-screen h-screen bg-neutral-900 text-white overflow-hidden flex flex-col">
+      <div className="flex-shrink-0">
+        <Header
+          onImport={() => setIsImporting(true)}
+          onExport={() => setShowExportModal(true)}
+          onSettings={() => setShowSettings(true)}
         />
+      </div>
+      <div className="flex-1 min-h-0 flex">
+        <div className="flex-shrink-0 flex flex-col mt-4 ml-4 mb-4 bg-neutral-800 border-t border-neutral-700 rounded-lg">
+          <Toolbar
+            currentTool={currentTool}
+            onToolSelect={setCurrentTool}
+            toolOptions={toolOptions}
+            onToolOptionsChange={handleToolOptionsChange}
+          />
+          <div className="w-56">
+            <ColorPicker
+              onColorSelect={handleColorSelect}
+              leftColor={leftColor}
+              rightColor={rightColor}
+              layers={layers}
+            />
+          </div>
+        </div>
+        {/* Canvas Area */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 p-4 min-h-0">
+            <Canvas
+              canvasRef={canvasRef}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onWheel={handleWheel}
+              settings={settings}
+            />
+          </div>
+          {/* Timeline */}
+          <div className="flex-shrink-0 mb-4 mr-4 ml-4">
+            <Timeline
+              frames={frames}
+              activeFrame={activeFrame}
+              onSelectFrame={handleSelectFrame}
+              onAddFrame={handleAddFrame}
+              onDeleteFrame={handleDeleteFrame}
+              onDuplicateFrame={handleDuplicateFrame}
+              showOnionSkin={showOnionSkin}
+              onToggleOnionSkin={handleToggleOnionSkin}
+              spriteSize={spriteSize}
+              settings={settings}
+            />
+          </div>
+        </div>
 
-        {/* Canvas and controls */}
-        <Canvas
-          canvasRef={canvasRef}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseLeave}
-          onWheel={handleWheel}
-          settings={settings}
-        />
+        {/* Right Sidebar */}
+        <div className="w-64 mt-4 mr-4 mb-4 rounded-lg bg-neutral-800 border-l border-neutral-700 flex flex-col min-h-0 flex-shrink-0">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+            <LayersPanel
+              layers={frames[activeFrame].layers}
+              activeLayer={activeLayer}
+              onLayerChange={handleMoveLayer}
+              onLayerAdd={handleAddLayer}
+              onDeleteLayer={handleDeleteLayer}
+              onDuplicateLayer={handleDuplicateLayer}
+              onLayerMove={handleMoveLayer}
+              onSelectLayer={handleSelectLayer}
+              onToggleVisibility={handleToggleVisibility}
+              onRenameLayer={handleRenameLayer}
+              onSetOpacity={handleSetLayerOpacity}
+              onCreateGroup={handleCreateGroup}
+              onAddToGroup={handleAddToGroup}
+              onRemoveFromGroup={handleRemoveFromGroup}
+              onMergeLayers={handleMergeLayers}
+            />
+          </div>
+          <div className="p-4 border-t border-neutral-700">
+            <Preview
+              frames={frames}
+              spriteSize={spriteSize}
+              settings={settings}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Settings Modal */}
-      <SettingsModal
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        settings={settings}
-        onSettingsChange={setSettings}
+      {showSettings && (
+        <SettingsModal
+          settings={settings}
+          onSettingsChange={setSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      <ExportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        onExport={doExport}
+        frames={frames}
+      />
+
+      <ImportModal
+        isOpen={isImporting}
+        onClose={() => setIsImporting(false)}
+        onImportFrame={handleImportFrame}
+        onImportFrames={handleImportFrames}
       />
     </div>
   )
