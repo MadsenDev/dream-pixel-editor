@@ -140,69 +140,69 @@ const LayersPanel = ({
       {/* Layer List */}
       <div className="flex-1 overflow-y-auto">
         <div className="space-y-1">
-          {layers.map((layer, idx) => (
+        {layers.map((layer, idx) => (
             <div
-              key={layer.id}
+            key={layer.id}
               className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors ${
                 idx === activeLayer ? 'bg-purple-900/40' : 
                 selectedLayers.has(idx) ? 'bg-purple-900/20' : 'hover:bg-neutral-700/50'
               } ${dragOverIdx === idx && draggedIdx !== null ? 'ring-1 ring-purple-400' : ''}`}
-              onClick={(e) => handleLayerClick(idx, e)}
-              onContextMenu={(e) => handleContextMenu(e, idx)}
-              draggable
-              onDragStart={() => handleDragStart(idx)}
-              onDragOver={(e) => handleDragOver(idx, e)}
-              onDrop={() => handleDrop(idx)}
-              onDragEnd={handleDragEnd}
-            >
-              {/* Visibility Toggle */}
-              <button
+            onClick={(e) => handleLayerClick(idx, e)}
+            onContextMenu={(e) => handleContextMenu(e, idx)}
+            draggable
+            onDragStart={() => handleDragStart(idx)}
+            onDragOver={(e) => handleDragOver(idx, e)}
+            onDrop={() => handleDrop(idx)}
+            onDragEnd={handleDragEnd}
+          >
+            {/* Visibility Toggle */}
+            <button
                 className="p-1 text-purple-400 hover:text-purple-300 focus:outline-none"
-                onClick={e => { e.stopPropagation(); onToggleVisibility(idx); }}
-                title={layer.visible ? 'Hide Layer' : 'Show Layer'}
-              >
+              onClick={e => { e.stopPropagation(); onToggleVisibility(idx); }}
+              title={layer.visible ? 'Hide Layer' : 'Show Layer'}
+            >
                 {layer.visible ? <FaEye className="w-3.5 h-3.5" /> : <FaEyeSlash className="w-3.5 h-3.5" />}
-              </button>
+            </button>
 
-              {/* Layer Name */}
-              {editingLayer === idx ? (
-                <input
-                  type="text"
-                  defaultValue={layer.name}
+            {/* Layer Name */}
+            {editingLayer === idx ? (
+              <input
+                type="text"
+                defaultValue={layer.name}
                   className="flex-1 bg-neutral-800 text-white px-1.5 rounded text-sm w-full max-w-full overflow-hidden text-ellipsis"
-                  onKeyDown={handleRenameSubmit}
-                  onBlur={() => setEditingLayer(null)}
-                  autoFocus
-                />
-              ) : (
-                <span 
-                  className="flex-1 truncate text-white text-sm"
-                  onDoubleClick={() => setEditingLayer(idx)}
-                >
-                  {layer.name}
-                </span>
-              )}
+                onKeyDown={handleRenameSubmit}
+                onBlur={() => setEditingLayer(null)}
+                autoFocus
+              />
+            ) : (
+              <span 
+                className="flex-1 truncate text-white text-sm"
+                onDoubleClick={() => setEditingLayer(idx)}
+              >
+                {layer.name}
+              </span>
+            )}
 
-              {/* Quick Actions */}
+            {/* Quick Actions */}
               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
+              <button
                   className="p-1 text-purple-400 hover:text-purple-300 focus:outline-none"
-                  onClick={e => { e.stopPropagation(); onDuplicateLayer(idx); }}
-                  title="Duplicate Layer"
-                >
+                onClick={e => { e.stopPropagation(); onDuplicateLayer(idx); }}
+                title="Duplicate Layer"
+              >
                   <FaCopy className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  className="p-1 text-red-400 hover:text-red-300 focus:outline-none"
-                  onClick={e => { e.stopPropagation(); onDeleteLayer(idx); }}
-                  title="Delete Layer"
-                  disabled={layers.length === 1}
-                >
+              </button>
+              <button
+                className="p-1 text-red-400 hover:text-red-300 focus:outline-none"
+                onClick={e => { e.stopPropagation(); onDeleteLayer(idx); }}
+                title="Delete Layer"
+                disabled={layers.length === 1}
+              >
                   <FaTrash className="w-3.5 h-3.5" />
-                </button>
+              </button>
               </div>
             </div>
-          ))}
+        ))}
         </div>
       </div>
 

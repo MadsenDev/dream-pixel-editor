@@ -124,10 +124,10 @@ const ImportModal = ({ isOpen, onClose, onImportFrame, onImportFrames }) => {
             style={{ background: '#222', borderRadius: 8, maxHeight: '50vh' }}
           >
             <div className="relative w-full" style={{ maxWidth: imgDimensions.width ? imgDimensions.width : '100%', maxHeight: '50vh' }}>
-              <img
-                ref={imgRef}
-                src={imgUrl}
-                alt="Preview"
+            <img
+              ref={imgRef}
+              src={imgUrl}
+              alt="Preview"
                 className="w-full h-auto object-contain"
                 style={{ maxHeight: '50vh', display: 'block', margin: '0 auto' }}
                 onLoad={e => {
@@ -137,12 +137,12 @@ const ImportModal = ({ isOpen, onClose, onImportFrame, onImportFrames }) => {
                     setCellWidth(Math.floor(imgRef.current.naturalWidth / cols))
                   }
                 }}
-              />
+            />
               <div
                 className="absolute inset-0"
                 style={{ pointerEvents: 'none' }}
               >
-                {renderGridOverlay()}
+            {renderGridOverlay()}
               </div>
             </div>
           </div>

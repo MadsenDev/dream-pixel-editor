@@ -89,9 +89,9 @@ const Timeline = ({
   }
 
   return (
-    <div className="w-full h-full flex flex-col bg-neutral-800 border-t border-neutral-700 rounded-lg">
+    <div className="w-full min-w-0 flex flex-col bg-neutral-800 border-t border-neutral-700 rounded-lg">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2">
+      <div className="flex items-center justify-between px-4 py-2 flex-shrink-0">
         <h2 className="text-sm font-semibold text-purple-300">Timeline</h2>
         <div className="flex items-center gap-1">
           <button
@@ -114,8 +114,8 @@ const Timeline = ({
       </div>
 
       {/* Frames */}
-      <div className="flex-1 overflow-x-auto">
-        <div className="flex items-center gap-2 px-4 pb-2">
+      <div className="px-4 pb-2">
+        <div className="flex items-center gap-2 overflow-x-auto max-w-full min-w-0">
           {frames.map((frame, idx) => (
             <div 
               key={frame.id} 

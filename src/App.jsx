@@ -152,32 +152,23 @@ function App() {
   useToolShortcuts(setCurrentTool, KEYBOARD_SHORTCUTS)
 
   // Move Layer Content: shift all pixels by dx, dy
-  const shiftLayerPixels = (dx, dy) => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
-      const oldPixels = frame.layers[activeLayer].pixels
-      const height = oldPixels.length
-      const width = oldPixels[0].length
-      const newPixels = Array(height).fill(null).map(() => Array(width).fill(null))
-      
-      // Copy pixels to their new positions
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const oldX = x - dx
-          const oldY = y - dy
-          if (oldX >= 0 && oldX < width && oldY >= 0 && oldY < height) {
-            newPixels[y][x] = oldPixels[oldY][oldX]
-          }
+  const shiftLayerPixels = (pixels, dx, dy) => {
+    const height = pixels.length
+    const width = pixels[0].length
+    const newPixels = Array(height).fill(null).map(() => Array(width).fill(null))
+    
+    // Copy pixels to their new positions
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const sourceX = x - dx
+        const sourceY = y - dy
+        if (sourceX >= 0 && sourceX < width && sourceY >= 0 && sourceY < height) {
+          newPixels[y][x] = pixels[sourceY][sourceX]
         }
       }
-      
-      return {
-        ...frame,
-        layers: frame.layers.map((layer, i) => 
-          i === activeLayer ? { ...layer, pixels: newPixels } : layer
-        )
-      }
-    }))
+    }
+    
+    return newPixels
   }
 
   // Track drag state for move tool
@@ -259,7 +250,16 @@ function App() {
       const dx = Math.round((e.clientX - moveStart.x) / (zoom * settings.defaultPixelSize))
       const dy = Math.round((e.clientY - moveStart.y) / (zoom * settings.defaultPixelSize))
       if (dx !== 0 || dy !== 0) {
-        shiftLayerPixels(dx, dy)
+        const newPixels = shiftLayerPixels(layers[activeLayer].pixels, dx, dy)
+        setFrames(prev => prev.map((frame, fidx) => {
+          if (fidx !== activeFrame) return frame
+          return {
+            ...frame,
+            layers: frame.layers.map((layer, i) => 
+              i === activeLayer ? { ...layer, pixels: newPixels } : layer
+            )
+          }
+        }))
         setMoveStart({ x: e.clientX, y: e.clientY })
       }
       return
@@ -837,7 +837,7 @@ function App() {
             />
           </div>
           {/* Timeline */}
-          <div className="flex-shrink-0 mb-4 mr-4 ml-4">
+          <div className="flex-shrink-0 mb-4 mr-4 ml-4 min-w-0">
             <Timeline
               frames={frames}
               activeFrame={activeFrame}

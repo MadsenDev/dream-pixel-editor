@@ -146,13 +146,13 @@ const Preview = ({ frames, spriteSize, settings, initialFps = 6 }) => {
           >
             <FaStepForward className="w-3.5 h-3.5" />
           </button>
-          <button
+        <button
             className="p-1.5 rounded bg-neutral-700 hover:bg-purple-600 text-purple-300 hover:text-white transition-colors"
             onClick={resetPlayback}
             title="Reset"
-          >
+        >
             <FaUndo className="w-3.5 h-3.5" />
-          </button>
+        </button>
         </div>
       </div>
 
@@ -201,7 +201,7 @@ const Preview = ({ frames, spriteSize, settings, initialFps = 6 }) => {
             value={playStart}
             onChange={e => setPlayStart(Number(e.target.value))}
             className="w-12 px-1 py-0.5 bg-neutral-700 border border-neutral-600 rounded text-xs text-purple-300"
-          />
+      />
           <span className="text-xs text-purple-300">To:</span>
           <input
             type="number"

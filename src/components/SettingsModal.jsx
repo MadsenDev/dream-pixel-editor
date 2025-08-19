@@ -33,30 +33,30 @@ const SettingsModal = ({ settings, onSettingsChange, onClose }) => {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'canvas':
-        return (
+  return (
           <div className="space-y-4">
-            {/* Grid Size */}
+          {/* Grid Size */}
             <div>
               <label className="block text-sm font-medium text-neutral-300 mb-2">Grid Size</label>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
                   <label className="block text-xs text-neutral-400 mb-1">Width</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="256"
-                    value={localSettings.gridWidth}
+                <input
+                  type="number"
+                  min="1"
+                  max="256"
+                  value={localSettings.gridWidth}
                     onChange={e => handleChange('gridWidth', parseInt(e.target.value))}
                     className="w-full px-3 py-2 bg-neutral-700 border border-neutral-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                </div>
-                <div>
+                />
+              </div>
+              <div>
                   <label className="block text-xs text-neutral-400 mb-1">Height</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="256"
-                    value={localSettings.gridHeight}
+                <input
+                  type="number"
+                  min="1"
+                  max="256"
+                  value={localSettings.gridHeight}
                     onChange={e => handleChange('gridHeight', parseInt(e.target.value))}
                     className="w-full px-3 py-2 bg-neutral-700 border border-neutral-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />
@@ -102,12 +102,12 @@ const SettingsModal = ({ settings, onSettingsChange, onClose }) => {
                     value={localSettings.gridColor}
                     onChange={e => handleChange('gridColor', e.target.value)}
                     className="w-full h-8 rounded cursor-pointer bg-neutral-700 border border-neutral-600"
-                  />
-                </div>
+                />
               </div>
             </div>
+          </div>
 
-            {/* Background Color */}
+          {/* Background Color */}
             <div>
               <label className="block text-sm font-medium text-neutral-300 mb-2">Background Color</label>
               <input
@@ -263,7 +263,7 @@ const SettingsModal = ({ settings, onSettingsChange, onClose }) => {
                 <option value="dark">Dark</option>
                 <option value="light">Light</option>
               </select>
-            </div>
+          </div>
 
             <div>
               <label className="block text-sm font-medium text-neutral-300 mb-2">UI Scale</label>
@@ -350,7 +350,7 @@ const SettingsModal = ({ settings, onSettingsChange, onClose }) => {
               <div className="space-y-3">
                 <div>
                   <label className="block text-xs text-neutral-400 mb-1">Scale</label>
-                  <input
+            <input
                     type="number"
                     min="1"
                     max="32"
@@ -380,12 +380,12 @@ const SettingsModal = ({ settings, onSettingsChange, onClose }) => {
                     <option value="single">Single Frame</option>
                     <option value="spriteSheet">Sprite Sheet</option>
                   </select>
-                </div>
+          </div>
                 <div>
                   <label className="block text-xs text-neutral-400 mb-1">Frames Per Row</label>
-                  <input
-                    type="number"
-                    min="1"
+            <input
+              type="number"
+              min="1"
                     max="32"
                     value={localSettings.defaultFramesPerRow || 4}
                     onChange={e => handleChange('defaultFramesPerRow', parseInt(e.target.value))}
