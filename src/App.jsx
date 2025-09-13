@@ -3,6 +3,7 @@ import Toolbar from './components/Toolbar'
 import ColorPicker from './components/ColorPicker'
 import SettingsModal from './components/SettingsModal'
 import Header from './components/Header'
+import LoadingScreen from './components/LoadingScreen'
 import { FaCog } from 'react-icons/fa'
 import { TOOLS, DEFAULT_SETTINGS, DEFAULT_TOOL_OPTIONS, DEFAULT_COLORS } from './constants'
 import { useDrawing } from './hooks/useDrawing'
@@ -30,6 +31,7 @@ const KEYBOARD_SHORTCUTS = {
 }
 
 function App() {
+  const [isLoading, setIsLoading] = useState(true)
   const [selectedTile, setSelectedTile] = useState(null)
   const [spriteSize, setSpriteSize] = useState({ width: DEFAULT_SETTINGS.gridWidth, height: DEFAULT_SETTINGS.gridHeight })
   const [zoom, setZoom] = useState(1)
@@ -795,6 +797,15 @@ function App() {
 
   const handleToolOptionsChange = (newOptions) => {
     setToolOptions(newOptions)
+  }
+
+  const handleLoadingComplete = () => {
+    setIsLoading(false)
+  }
+
+  // Show loading screen while app is initializing
+  if (isLoading) {
+    return <LoadingScreen onComplete={handleLoadingComplete} />
   }
 
   return (
