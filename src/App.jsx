@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import Toolbar from './components/Toolbar'
 import ColorPicker from './components/ColorPicker'
 import SettingsModal from './components/SettingsModal'
@@ -79,10 +79,39 @@ function App() {
   const layerIdCounter = currentFrame.layerIdCounter
 
   // Add back handleFramesChange
-  const handleFramesChange = (updater) => {
-    const newFrames = typeof updater === 'function' ? updater(frames) : updater
-    setFrames(newFrames)
-  }
+  const handleFramesChange = useCallback((updater) => {
+    setFrames(prevFrames => {
+      const nextFrames = typeof updater === 'function' ? updater(prevFrames) : updater
+      return nextFrames
+    })
+  }, [])
+
+  const updateActiveFrame = useCallback((updater) => {
+    handleFramesChange(prevFrames => prevFrames.map((frame, index) => {
+      if (index !== activeFrame) return frame
+      const updatedFrame = updater(frame)
+      return updatedFrame === undefined ? frame : updatedFrame
+    }))
+  }, [activeFrame, handleFramesChange])
+
+  const updateActiveFrameLayers = useCallback((updater) => {
+    updateActiveFrame(frame => {
+      const nextLayers = typeof updater === 'function' ? updater(frame.layers) : updater
+      if (nextLayers === frame.layers) return frame
+      return { ...frame, layers: nextLayers }
+    })
+  }, [updateActiveFrame])
+
+  const updateLayerAt = useCallback((index, updater) => {
+    updateActiveFrame(frame => {
+      const nextLayers = frame.layers.map((layer, layerIdx) => {
+        if (layerIdx !== index) return layer
+        const updatedLayer = updater(layer, frame)
+        return updatedLayer === undefined ? layer : updatedLayer
+      })
+      return { ...frame, layers: nextLayers }
+    })
+  }, [updateActiveFrame])
 
   // Drawing hook
   const {
@@ -113,14 +142,7 @@ function App() {
     spriteSize,
     settings,
     frames[activeFrame].layers,
-    (updater) => {
-      const newFrames = [...frames]
-      newFrames[activeFrame] = {
-        ...newFrames[activeFrame],
-        layers: typeof updater === 'function' ? updater(newFrames[activeFrame].layers) : updater
-      }
-      handleFramesChange(newFrames)
-    },
+    updateActiveFrameLayers,
     activeLayer
   )
 
@@ -131,6 +153,9 @@ function App() {
 
   // For useCanvas, pass showOnionSkin and previous frame's layers (if any)
   const previousLayers = activeFrame > 0 ? frames[activeFrame - 1].layers : null
+  const activeLayerPreview = movePreview && (movePreview.dx !== 0 || movePreview.dy !== 0)
+    ? { layerIndex: activeLayer, dx: movePreview.dx, dy: movePreview.dy }
+    : null
 
   useCanvas(
     canvasRef,
@@ -147,14 +172,15 @@ function App() {
     toolOptions,
     settings,
     showOnionSkin,
-    previousLayers
+    previousLayers,
+    activeLayerPreview
   )
 
   // Use the custom hook for keyboard shortcuts
   useToolShortcuts(setCurrentTool, KEYBOARD_SHORTCUTS)
 
   // Move Layer Content: shift all pixels by dx, dy
-  const shiftLayerPixels = (pixels, dx, dy) => {
+  const shiftLayerPixels = useCallback((pixels, dx, dy) => {
     const height = pixels.length
     const width = pixels[0].length
     const newPixels = Array(height).fill(null).map(() => Array(width).fill(null))
@@ -169,12 +195,13 @@ function App() {
         }
       }
     }
-    
+
     return newPixels
-  }
+  }, [])
 
   // Track drag state for move tool
   const [moveStart, setMoveStart] = useState(null)
+  const [movePreview, setMovePreview] = useState(null)
 
   const handleMouseDown = (e) => {
     if (currentTool === TOOLS.PAN) {
@@ -184,6 +211,7 @@ function App() {
     }
     if (currentTool === TOOLS.MOVE_LAYER_CONTENT) {
       setMoveStart({ x: e.clientX, y: e.clientY })
+      setMovePreview({ dx: 0, dy: 0 })
       return
     }
 
@@ -251,18 +279,8 @@ function App() {
     if (currentTool === TOOLS.MOVE_LAYER_CONTENT && moveStart) {
       const dx = Math.round((e.clientX - moveStart.x) / (zoom * settings.defaultPixelSize))
       const dy = Math.round((e.clientY - moveStart.y) / (zoom * settings.defaultPixelSize))
-      if (dx !== 0 || dy !== 0) {
-        const newPixels = shiftLayerPixels(layers[activeLayer].pixels, dx, dy)
-        setFrames(prev => prev.map((frame, fidx) => {
-          if (fidx !== activeFrame) return frame
-          return {
-            ...frame,
-            layers: frame.layers.map((layer, i) => 
-              i === activeLayer ? { ...layer, pixels: newPixels } : layer
-            )
-          }
-        }))
-        setMoveStart({ x: e.clientX, y: e.clientY })
+      if (!movePreview || movePreview.dx !== dx || movePreview.dy !== dy) {
+        setMovePreview({ dx, dy })
       }
       return
     }
@@ -330,7 +348,16 @@ function App() {
       drawCircle(circleStart, circlePreview, circleStart.color, toolOptions)
     }
     if (currentTool === TOOLS.MOVE_LAYER_CONTENT && moveStart) {
+      const dx = movePreview ? movePreview.dx : Math.round((e.clientX - moveStart.x) / (zoom * settings.defaultPixelSize))
+      const dy = movePreview ? movePreview.dy : Math.round((e.clientY - moveStart.y) / (zoom * settings.defaultPixelSize))
+      if (dx !== 0 || dy !== 0) {
+        updateLayerAt(activeLayer, layer => ({
+          ...layer,
+          pixels: shiftLayerPixels(layer.pixels, dx, dy)
+        }))
+      }
       setMoveStart(null)
+      setMovePreview(null)
       return
     }
     setLineStart(null)
@@ -346,6 +373,8 @@ function App() {
   const handleMouseLeave = () => {
     setIsDrawing(false)
     setIsPanning(false)
+    setMoveStart(null)
+    setMovePreview(null)
   }
 
   const handleWheel = (e) => {
@@ -369,8 +398,11 @@ function App() {
     try {
       const { frame, width, height } = await importPngToFrame(file)
       setSpriteSize({ width, height })
-      setFrames(prev => [...prev, frame])
-      setActiveFrame(frames.length)
+      handleFramesChange(prev => {
+        const next = [...prev, frame]
+        setActiveFrame(next.length - 1)
+        return next
+      })
       setIsImporting(false)
     } catch (error) {
       console.error('Error importing image:', error)
@@ -381,10 +413,10 @@ function App() {
 
   // Handler: Add Layer
   const handleAddLayer = () => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
+    updateActiveFrame(frame => {
+      const nextId = frame.layerIdCounter + 1
       const newLayer = {
-        id: frame.layerIdCounter + 1,
+        id: nextId,
         name: `Layer ${frame.layers.length + 1}`,
         visible: true,
         opacity: 1,
@@ -394,16 +426,15 @@ function App() {
       return {
         ...frame,
         layers: [...frame.layers, newLayer],
-        layerIdCounter: frame.layerIdCounter + 1,
+        layerIdCounter: nextId,
         activeLayer: frame.layers.length
       }
-    }))
+    })
   }
 
   // Handler: Delete Layer
   const handleDeleteLayer = (idx) => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
+    updateActiveFrame(frame => {
       if (frame.layers.length === 1) return frame
       const newLayers = frame.layers.filter((_, i) => i !== idx)
       let newActive = frame.activeLayer
@@ -414,34 +445,24 @@ function App() {
         layers: newLayers,
         activeLayer: newActive
       }
-    }))
+    })
   }
 
   // Handler: Select Layer
   const handleSelectLayer = (idx) => {
-    setFrames(prev => prev.map((frame, fidx) =>
-      fidx === activeFrame ? { ...frame, activeLayer: idx } : frame
-    ))
+    updateActiveFrame(frame => ({ ...frame, activeLayer: idx }))
   }
 
   // Handler: Toggle Visibility
   const handleToggleVisibility = (idx) => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
-      return {
-        ...frame,
-        layers: frame.layers.map((layer, i) => i === idx ? { ...layer, visible: !layer.visible } : layer)
-      }
-    }))
+    updateLayerAt(idx, layer => ({ ...layer, visible: !layer.visible }))
   }
 
   // Handler: Move Layer (now accepts fromIdx, toIdx)
   const handleMoveLayer = (fromIdx, toIdxOrDirection) => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
+    updateActiveFrame(frame => {
       let layers = [...frame.layers]
       let toIdx = toIdxOrDirection
-      // Support old up/down direction for button usage
       if (typeof toIdxOrDirection === 'string') {
         if (toIdxOrDirection === 'up' && fromIdx > 0) toIdx = fromIdx - 1
         else if (toIdxOrDirection === 'down' && fromIdx < layers.length - 1) toIdx = fromIdx + 1
@@ -455,89 +476,63 @@ function App() {
       else if (fromIdx < frame.activeLayer && toIdx >= frame.activeLayer) newActive = frame.activeLayer - 1
       else if (fromIdx > frame.activeLayer && toIdx <= frame.activeLayer) newActive = frame.activeLayer + 1
       return { ...frame, layers, activeLayer: newActive }
-    }))
+    })
   }
 
   // Handler: Duplicate Layer
   const handleDuplicateLayer = (idx) => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
+    updateActiveFrame(frame => {
+      const nextId = frame.layerIdCounter + 1
       const newLayer = {
         ...frame.layers[idx],
-        id: frame.layerIdCounter + 1,
+        id: nextId,
         name: `${frame.layers[idx].name} (copy)`,
         pixels: frame.layers[idx].pixels.map(row => [...row])
       }
       return {
         ...frame,
         layers: [...frame.layers, newLayer],
-        layerIdCounter: frame.layerIdCounter + 1,
+        layerIdCounter: nextId,
         activeLayer: frame.layers.length
       }
-    }))
+    })
   }
 
   // Handler: Rename Layer
   const handleRenameLayer = (idx, newName) => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
-      return {
-        ...frame,
-        layers: frame.layers.map((layer, i) => i === idx ? { ...layer, name: newName } : layer)
-      }
-    }))
+    updateLayerAt(idx, layer => ({ ...layer, name: newName }))
   }
 
   // Handler: Set Layer Opacity
   const handleSetLayerOpacity = (idx, opacity) => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
-      return {
-        ...frame,
-        layers: frame.layers.map((layer, i) => i === idx ? { ...layer, opacity } : layer)
-      }
-    }))
+    updateLayerAt(idx, layer => ({ ...layer, opacity }))
   }
 
   // Handler: Create Group
   const handleCreateGroup = () => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
+    updateActiveFrame(frame => {
       const groupId = frame.nextGroupId
       return {
         ...frame,
         nextGroupId: groupId + 1,
         layers: frame.layers.map((layer, i) => i === frame.activeLayer ? { ...layer, groupId } : layer)
       }
-    }))
+    })
   }
 
   // Handler: Add to Group
   const handleAddToGroup = (idx, groupId) => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
-      return {
-        ...frame,
-        layers: frame.layers.map((layer, i) => i === idx ? { ...layer, groupId } : layer)
-      }
-    }))
+    updateLayerAt(idx, layer => ({ ...layer, groupId }))
   }
 
   // Handler: Remove from Group
   const handleRemoveFromGroup = (idx) => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
-      return {
-        ...frame,
-        layers: frame.layers.map((layer, i) => i === idx ? { ...layer, groupId: null } : layer)
-      }
-    }))
+    updateLayerAt(idx, layer => ({ ...layer, groupId: null }))
   }
 
   // Handler: Merge Layers
   const handleMergeLayers = (indices) => {
-    setFrames(prev => prev.map((frame, fidx) => {
-      if (fidx !== activeFrame) return frame
+    updateActiveFrame(frame => {
       if (indices.length < 2) return frame
       const newLayers = frame.layers.filter((_, i) => !indices.includes(i))
       const mergedPixels = Array(settings.gridHeight).fill(null).map(() => Array(settings.gridWidth).fill(null))
@@ -565,7 +560,7 @@ function App() {
         layerIdCounter: frame.layerIdCounter + 1,
         activeLayer: newLayers.length
       }
-    }))
+    })
   }
 
   // Arrow key movement for move tool
@@ -580,31 +575,15 @@ function App() {
       if (e.key === 'ArrowDown') dy = 1
       if (dx !== 0 || dy !== 0) {
         e.preventDefault()
-        setFrames(prev => prev.map((frame, fidx) => {
-          if (fidx !== activeFrame) return frame
-          const oldPixels = frame.layers[frame.activeLayer].pixels
-          const height = oldPixels.length
-          const width = oldPixels[0].length
-          const newPixels = Array(height).fill(null).map(() => Array(width).fill(null))
-          for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-              const newX = x + dx
-              const newY = y + dy
-              if (newX >= 0 && newX < width && newY >= 0 && newY < height) {
-                newPixels[newY][newX] = oldPixels[y][x]
-              }
-            }
-          }
-          const newLayers = frame.layers.map((layer, idx) =>
-            idx === frame.activeLayer ? { ...layer, pixels: newPixels } : layer
-          )
-          return { ...frame, layers: newLayers }
+        updateLayerAt(activeLayer, layer => ({
+          ...layer,
+          pixels: shiftLayerPixels(layer.pixels, dx, dy)
         }))
       }
     }
     window.addEventListener('keydown', handleArrow)
     return () => window.removeEventListener('keydown', handleArrow)
-  }, [currentTool, activeLayer, activeFrame, frames])
+  }, [currentTool, activeLayer, shiftLayerPixels, updateLayerAt])
 
   // Export logic
   const handleExport = () => {
@@ -712,37 +691,43 @@ function App() {
 
   // Frame handlers
   const handleAddFrame = () => {
-    setFrames(prev => [
-      ...prev,
-      {
-        id: prev.length + 1,
-        name: `Frame ${prev.length + 1}`,
-        layers: [
-          {
-            id: 1,
-            name: 'Layer 1',
-            visible: true,
-            opacity: 1,
-            groupId: null,
-            pixels: Array(settings.gridHeight).fill(null).map(() => Array(settings.gridWidth).fill(null))
-          }
-        ],
-        layerIdCounter: 1,
-        nextGroupId: 1,
-        activeLayer: 0
-      }
-    ])
-    setActiveFrame(frames.length)
+    handleFramesChange(prev => {
+      const next = [
+        ...prev,
+        {
+          id: prev.length + 1,
+          name: `Frame ${prev.length + 1}`,
+          layers: [
+            {
+              id: 1,
+              name: 'Layer 1',
+              visible: true,
+              opacity: 1,
+              groupId: null,
+              pixels: Array(settings.gridHeight).fill(null).map(() => Array(settings.gridWidth).fill(null))
+            }
+          ],
+          layerIdCounter: 1,
+          nextGroupId: 1,
+          activeLayer: 0
+        }
+      ]
+      setActiveFrame(next.length - 1)
+      return next
+    })
   }
   const handleDeleteFrame = (idx) => {
     if (frames.length === 1) return
-    setFrames(prev => prev.filter((_, i) => i !== idx))
-    setActiveFrame(prev => prev === idx ? 0 : prev > idx ? prev - 1 : prev)
+    handleFramesChange(prev => {
+      const next = prev.filter((_, i) => i !== idx)
+      const newActive = activeFrame === idx ? 0 : activeFrame > idx ? activeFrame - 1 : activeFrame
+      setActiveFrame(newActive)
+      return next
+    })
   }
   const handleDuplicateFrame = (idx) => {
-    setFrames(prev => [
-      ...prev,
-      {
+    handleFramesChange(prev => {
+      const duplicated = {
         ...prev[idx],
         id: prev.length + 1,
         name: `${prev[idx].name} (copy)`,
@@ -754,8 +739,10 @@ function App() {
         nextGroupId: prev[idx].nextGroupId,
         activeLayer: prev[idx].activeLayer
       }
-    ])
-    setActiveFrame(frames.length)
+      const next = [...prev, duplicated]
+      setActiveFrame(next.length - 1)
+      return next
+    })
   }
   const handleSelectFrame = (idx) => setActiveFrame(idx)
   const handleToggleOnionSkin = () => setShowOnionSkin(v => !v)
@@ -769,7 +756,7 @@ function App() {
   // Handler for ImportModal (single image)
   const handleImportFrame = ({ frame, width, height }) => {
     setSpriteSize({ width, height })
-    setFrames([
+    handleFramesChange(() => [
       {
         ...frame,
         id: 1,
@@ -786,7 +773,7 @@ function App() {
   // Handler for ImportModal (sprite sheet)
   const handleImportFrames = ({ frames, width, height }) => {
     setSpriteSize({ width, height })
-    setFrames(frames.map((frame, i) => ({
+    handleFramesChange(() => frames.map((frame, i) => ({
       ...frame,
       id: i + 1,
       name: `Frame ${i + 1}`,
@@ -842,7 +829,7 @@ function App() {
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
               onWheel={handleWheel}
               settings={settings}
             />
