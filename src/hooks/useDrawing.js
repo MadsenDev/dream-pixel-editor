@@ -1,14 +1,50 @@
-import { useState, useRef, useCallback } from 'react'
+import { useReducer, useRef, useCallback } from 'react'
 import { TOOLS, PIXEL_SIZE } from '../constants'
 
+const initialToolState = {
+  isDrawing: false,
+  lineStart: null,
+  linePreview: null,
+  rectStart: null,
+  rectPreview: null,
+  circleStart: null,
+  circlePreview: null
+}
+
+const toolReducer = (state, action) => {
+  switch (action.type) {
+    case 'SET_IS_DRAWING':
+      return { ...state, isDrawing: action.value }
+    case 'SET_LINE_START':
+      return { ...state, lineStart: action.value }
+    case 'SET_LINE_PREVIEW':
+      return { ...state, linePreview: action.value }
+    case 'SET_RECT_START':
+      return { ...state, rectStart: action.value }
+    case 'SET_RECT_PREVIEW':
+      return { ...state, rectPreview: action.value }
+    case 'SET_CIRCLE_START':
+      return { ...state, circleStart: action.value }
+    case 'SET_CIRCLE_PREVIEW':
+      return { ...state, circlePreview: action.value }
+    default:
+      return state
+  }
+}
+
 export const useDrawing = (spriteSize, settings, layers, setLayers, activeLayer) => {
-  const [isDrawing, setIsDrawing] = useState(false)
-  const [lineStart, setLineStart] = useState(null)
-  const [linePreview, setLinePreview] = useState(null)
-  const [rectStart, setRectStart] = useState(null)
-  const [rectPreview, setRectPreview] = useState(null)
-  const [circleStart, setCircleStart] = useState(null)
-  const [circlePreview, setCirclePreview] = useState(null)
+
+  const [toolState, dispatchToolState] = useReducer(toolReducer, initialToolState)
+
+  const setIsDrawing = useCallback((value) => dispatchToolState({ type: 'SET_IS_DRAWING', value }), [dispatchToolState])
+  const setLineStart = useCallback((value) => dispatchToolState({ type: 'SET_LINE_START', value }), [dispatchToolState])
+  const setLinePreview = useCallback((value) => dispatchToolState({ type: 'SET_LINE_PREVIEW', value }), [dispatchToolState])
+  const setRectStart = useCallback((value) => dispatchToolState({ type: 'SET_RECT_START', value }), [dispatchToolState])
+  const setRectPreview = useCallback((value) => dispatchToolState({ type: 'SET_RECT_PREVIEW', value }), [dispatchToolState])
+  const setCircleStart = useCallback((value) => dispatchToolState({ type: 'SET_CIRCLE_START', value }), [dispatchToolState])
+  const setCirclePreview = useCallback((value) => dispatchToolState({ type: 'SET_CIRCLE_PREVIEW', value }), [dispatchToolState])
+
+  const { isDrawing, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview } = toolState
   const canvasRef = useRef(null)
   const lastPencilPixel = useRef(null)
 

@@ -16,7 +16,8 @@ export const useCanvas = (
   toolOptions,
   settings,
   showOnionSkin = false,
-  previousLayers = null
+  previousLayers = null,
+  movePreview = null
 ) => {
   const frameRef = useRef(null)
   const prevLayersRef = useRef(layers)
@@ -38,9 +39,10 @@ export const useCanvas = (
       rectStart !== null ||
       rectPreview !== null ||
       circleStart !== null ||
-      circlePreview !== null
+      circlePreview !== null ||
+      movePreview !== null
     )
-  }, [layers, pan, zoom, settings, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview])
+  }, [layers, pan, zoom, settings, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, movePreview])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -121,16 +123,24 @@ export const useCanvas = (
       }
 
       // Draw current layers
-      layers.forEach(layer => {
+      layers.forEach((layer, layerIndex) => {
         if (!layer.visible) return
         const pixelData = layer.pixels
         ctx.globalAlpha = layer.opacity
+        const offsetX = movePreview && movePreview.layerIndex === layerIndex ? movePreview.dx : 0
+        const offsetY = movePreview && movePreview.layerIndex === layerIndex ? movePreview.dy : 0
+        const height = pixelData.length
+        const width = pixelData[0].length
         for (let y = 0; y < pixelData.length; y++) {
           for (let x = 0; x < pixelData[y].length; x++) {
             const color = pixelData[y][x]
             if (color) {
-              ctx.fillStyle = color
-              ctx.fillRect(x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE)
+              const targetX = x + offsetX
+              const targetY = y + offsetY
+              if (targetX >= 0 && targetX < width && targetY >= 0 && targetY < height) {
+                ctx.fillStyle = color
+                ctx.fillRect(targetX * PIXEL_SIZE, targetY * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE)
+              }
             }
           }
         }
@@ -321,5 +331,5 @@ export const useCanvas = (
         cancelAnimationFrame(frameRef.current)
       }
     }
-  }, [canvasRef, spriteSize, layers, zoom, pan, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, toolOptions, settings, showOnionSkin, previousLayers, shouldRedraw])
-} 
+  }, [canvasRef, spriteSize, layers, zoom, pan, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, toolOptions, settings, showOnionSkin, previousLayers, movePreview, shouldRedraw])
+}
