@@ -151,6 +151,10 @@ function App() {
     setSpriteSize({ width: settings.gridWidth, height: settings.gridHeight })
   }, [settings.gridWidth, settings.gridHeight])
 
+  // Track drag state for move tool
+  const [moveStart, setMoveStart] = useState(null)
+  const [movePreview, setMovePreview] = useState(null)
+
   // For useCanvas, pass showOnionSkin and previous frame's layers (if any)
   const previousLayers = activeFrame > 0 ? frames[activeFrame - 1].layers : null
   const activeLayerPreview = movePreview && (movePreview.dx !== 0 || movePreview.dy !== 0)
@@ -198,10 +202,6 @@ function App() {
 
     return newPixels
   }, [])
-
-  // Track drag state for move tool
-  const [moveStart, setMoveStart] = useState(null)
-  const [movePreview, setMovePreview] = useState(null)
 
   const handleMouseDown = (e) => {
     if (currentTool === TOOLS.PAN) {
