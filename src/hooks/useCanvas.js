@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo } from 'react'
-import { PIXEL_SIZE } from '../constants'
+import { PIXEL_SIZE, VIEW_HELPERS } from '../constants'
 
 export const useCanvas = (
   canvasRef,
@@ -15,6 +15,7 @@ export const useCanvas = (
   circlePreview,
   toolOptions,
   settings,
+  viewHelper = VIEW_HELPERS.NONE,
   showOnionSkin = false,
   previousLayers = null,
   movePreview = null
@@ -40,9 +41,10 @@ export const useCanvas = (
       rectPreview !== null ||
       circleStart !== null ||
       circlePreview !== null ||
-      movePreview !== null
+      movePreview !== null ||
+      viewHelper !== VIEW_HELPERS.NONE
     )
-  }, [layers, pan, zoom, settings, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, movePreview])
+  }, [layers, pan, zoom, settings, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, movePreview, viewHelper])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -102,6 +104,90 @@ export const useCanvas = (
           ctx.stroke()
         }
       }
+
+      const drawViewHelper = () => {
+        if (!viewHelper || viewHelper === VIEW_HELPERS.NONE) return
+
+        const helperStroke = settings.viewHelperColor || 'rgba(147, 197, 253, 0.55)'
+        const helperFill = settings.viewHelperAccentColor || 'rgba(59, 130, 246, 0.2)'
+        const fullWidth = spriteSize.width * PIXEL_SIZE
+        const fullHeight = spriteSize.height * PIXEL_SIZE
+        const midX = fullWidth / 2
+        const midY = fullHeight / 2
+        const axisLength = Math.min(fullWidth, fullHeight) * 0.65
+
+        ctx.save()
+        ctx.lineWidth = 1 / scale
+        ctx.strokeStyle = helperStroke
+        ctx.setLineDash([PIXEL_SIZE / 1.5, PIXEL_SIZE / 1.5])
+
+        switch (viewHelper) {
+          case VIEW_HELPERS.TOP_DOWN: {
+            ctx.beginPath()
+            ctx.moveTo(midX, 0)
+            ctx.lineTo(midX, fullHeight)
+            ctx.moveTo(0, midY)
+            ctx.lineTo(fullWidth, midY)
+            ctx.stroke()
+
+            ctx.setLineDash([])
+            ctx.fillStyle = helperFill
+            const tileSize = PIXEL_SIZE * 3
+            ctx.fillRect(midX - tileSize / 2, midY - tileSize / 2, tileSize, tileSize)
+            break
+          }
+          case VIEW_HELPERS.SIDE: {
+            ctx.beginPath()
+            const groundY = fullHeight - PIXEL_SIZE * 2
+            ctx.moveTo(0, groundY)
+            ctx.lineTo(fullWidth, groundY)
+            ctx.moveTo(midX, 0)
+            ctx.lineTo(midX, fullHeight)
+            ctx.stroke()
+
+            ctx.setLineDash([])
+            ctx.fillStyle = helperFill
+            const frontHeight = fullHeight * 0.5
+            const frontWidth = fullWidth * 0.2
+            ctx.fillRect(midX - frontWidth / 2, groundY - frontHeight, frontWidth, frontHeight)
+            break
+          }
+          case VIEW_HELPERS.ISOMETRIC: {
+            ctx.setLineDash([])
+            const verticalLength = axisLength
+            const diagLength = axisLength
+            const angle = Math.PI / 6 // 30 degrees
+
+            ctx.beginPath()
+            ctx.moveTo(midX, midY)
+            ctx.lineTo(midX, midY - verticalLength)
+            ctx.moveTo(midX, midY)
+            ctx.lineTo(midX + Math.cos(angle) * diagLength, midY + Math.sin(angle) * diagLength)
+            ctx.moveTo(midX, midY)
+            ctx.lineTo(midX - Math.cos(angle) * diagLength, midY + Math.sin(angle) * diagLength)
+            ctx.stroke()
+
+            ctx.fillStyle = helperFill
+            ctx.beginPath()
+            const diamondWidth = axisLength
+            const diamondHeight = axisLength * 0.6
+            ctx.moveTo(midX, midY - diamondHeight)
+            ctx.lineTo(midX + diamondWidth / 2, midY)
+            ctx.lineTo(midX, midY + diamondHeight)
+            ctx.lineTo(midX - diamondWidth / 2, midY)
+            ctx.closePath()
+            ctx.fill()
+            ctx.stroke()
+            break
+          }
+          default:
+            break
+        }
+
+        ctx.restore()
+      }
+
+      drawViewHelper()
 
       // Onion skin: draw previous frame's layers with low opacity
       if (showOnionSkin && previousLayers) {
@@ -331,5 +417,5 @@ export const useCanvas = (
         cancelAnimationFrame(frameRef.current)
       }
     }
-  }, [canvasRef, spriteSize, layers, zoom, pan, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, toolOptions, settings, showOnionSkin, previousLayers, movePreview, shouldRedraw])
+  }, [canvasRef, spriteSize, layers, zoom, pan, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, toolOptions, settings, viewHelper, showOnionSkin, previousLayers, movePreview, shouldRedraw])
 }

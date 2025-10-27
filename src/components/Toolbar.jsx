@@ -1,4 +1,5 @@
-import { FaPencilAlt, FaHandPaper, FaEraser, FaFillDrip, FaEyeDropper, FaSlash, FaSquare, FaCircle, FaArrowsAlt, FaExpand, FaCompress, FaVectorSquare } from 'react-icons/fa'
+import { FaPencilAlt, FaHandPaper, FaEraser, FaFillDrip, FaEyeDropper, FaSlash, FaSquare, FaCircle, FaArrowsAlt, FaExpand, FaCompress, FaVectorSquare, FaCrosshairs, FaArrowsAltV, FaCube } from 'react-icons/fa'
+import { VIEW_HELPERS } from '../constants'
 
 const TOOLS = {
   PENCIL: 'pencil',
@@ -36,6 +37,27 @@ const TOOL_GROUPS = [
       { id: TOOLS.PAN, icon: FaHandPaper, label: 'Pan', shortcut: 'H' },
       { id: TOOLS.MOVE_LAYER_CONTENT, icon: FaArrowsAlt, label: 'Move Layer', shortcut: 'M' }
     ]
+  }
+]
+
+const VIEW_HELPER_OPTIONS = [
+  {
+    id: VIEW_HELPERS.TOP_DOWN,
+    icon: FaCrosshairs,
+    label: 'Top-Down',
+    description: 'Align sprites from an overhead camera with center crosshairs.'
+  },
+  {
+    id: VIEW_HELPERS.SIDE,
+    icon: FaArrowsAltV,
+    label: 'Side View',
+    description: 'Establish a ground line and vertical center for profile sprites.'
+  },
+  {
+    id: VIEW_HELPERS.ISOMETRIC,
+    icon: FaCube,
+    label: 'Isometric',
+    description: 'Overlay 120° axes and a diamond plane for isometric construction.'
   }
 ]
 
@@ -99,6 +121,38 @@ const ToolOptions = ({ currentTool, toolOptions, onToolOptionsChange }) => {
   )
 }
 
+const ViewHelperSection = ({ viewHelper, onViewHelperChange }) => {
+  const description = VIEW_HELPER_OPTIONS.find(option => option.id === viewHelper)?.description
+    || 'Toggle helpers to reveal orientation guides on the canvas.'
+
+  return (
+    <div className="border-t border-neutral-700 mt-3 pt-3">
+      <div className="text-xs font-medium text-neutral-400 mb-3 px-3">View Helpers</div>
+      <div className="grid grid-cols-3 gap-2 px-3">
+        {VIEW_HELPER_OPTIONS.map(option => {
+          const isActive = viewHelper === option.id
+          return (
+            <button
+              key={option.id}
+              onClick={() => onViewHelperChange(option.id)}
+              className={`group relative p-3 rounded-lg hover:bg-neutral-700/80 text-neutral-300 hover:text-white focus:outline-none focus:ring-2 focus:ring-purple-500 transition-colors flex items-center justify-center ${
+                isActive ? 'bg-indigo-900/40 text-white ring-1 ring-indigo-400/60' : ''
+              }`}
+              title={option.label}
+            >
+              <option.icon className="w-5 h-5" />
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-neutral-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                {option.label}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      <p className="mt-3 text-xs text-neutral-400 px-3 leading-relaxed">{description}</p>
+    </div>
+  )
+}
+
 const ToolDescription = ({ currentTool }) => {
   const getDescription = () => {
     switch (currentTool) {
@@ -132,7 +186,7 @@ const ToolDescription = ({ currentTool }) => {
   )
 }
 
-const Toolbar = ({ currentTool, onToolSelect, toolOptions, onToolOptionsChange }) => {
+const Toolbar = ({ currentTool, onToolSelect, toolOptions, onToolOptionsChange, viewHelper, onViewHelperChange }) => {
   return (
     <div className="bg-neutral-800 rounded-lg shadow-lg w-56 flex flex-col">
       {/* Header */}
@@ -165,6 +219,11 @@ const Toolbar = ({ currentTool, onToolSelect, toolOptions, onToolOptionsChange }
           currentTool={currentTool}
           toolOptions={toolOptions}
           onToolOptionsChange={onToolOptionsChange}
+        />
+
+        <ViewHelperSection
+          viewHelper={viewHelper}
+          onViewHelperChange={onViewHelperChange}
         />
       </div>
     </div>
