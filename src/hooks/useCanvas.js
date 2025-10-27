@@ -132,8 +132,15 @@ export const useCanvas = (
 
             ctx.setLineDash([])
             ctx.fillStyle = helperFill
-            const tileSize = PIXEL_SIZE * 3
-            ctx.fillRect(midX - tileSize / 2, midY - tileSize / 2, tileSize, tileSize)
+            const highlightSpanX = Math.min(3, spriteSize.width)
+            const highlightSpanY = Math.min(3, spriteSize.height)
+            const centerTileX = Math.floor(spriteSize.width / 2)
+            const centerTileY = Math.floor(spriteSize.height / 2)
+            const startTileX = Math.max(0, Math.min(centerTileX - Math.floor(highlightSpanX / 2), spriteSize.width - highlightSpanX))
+            const startTileY = Math.max(0, Math.min(centerTileY - Math.floor(highlightSpanY / 2), spriteSize.height - highlightSpanY))
+            const highlightWidth = highlightSpanX * PIXEL_SIZE
+            const highlightHeight = highlightSpanY * PIXEL_SIZE
+            ctx.fillRect(startTileX * PIXEL_SIZE, startTileY * PIXEL_SIZE, highlightWidth, highlightHeight)
             break
           }
           case VIEW_HELPERS.SIDE: {
