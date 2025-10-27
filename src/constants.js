@@ -11,6 +11,13 @@ export const TOOLS = {
   MOVE_LAYER_CONTENT: 'move_layer_content'
 }
 
+export const VIEW_HELPERS = {
+  NONE: 'none',
+  TOP_DOWN: 'top_down',
+  SIDE: 'side',
+  ISOMETRIC: 'isometric'
+}
+
 export const PIXEL_SIZE = 32
 
 export const DEFAULT_SPRITE_SIZE = {

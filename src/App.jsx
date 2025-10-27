@@ -5,7 +5,7 @@ import SettingsModal from './components/SettingsModal'
 import Header from './components/Header'
 import LoadingScreen from './components/LoadingScreen'
 import { FaCog } from 'react-icons/fa'
-import { TOOLS, DEFAULT_SETTINGS, DEFAULT_TOOL_OPTIONS, DEFAULT_COLORS } from './constants'
+import { TOOLS, DEFAULT_SETTINGS, DEFAULT_TOOL_OPTIONS, DEFAULT_COLORS, VIEW_HELPERS } from './constants'
 import { useDrawing } from './hooks/useDrawing'
 import { useCanvas } from './hooks/useCanvas'
 import Canvas from './components/Canvas'
@@ -48,6 +48,7 @@ function App() {
   const [showExportModal, setShowExportModal] = useState(false)
   const [exportScale, setExportScale] = useState(1)
   const [showOnionSkin, setShowOnionSkin] = useState(false)
+  const [viewHelper, setViewHelper] = useState(VIEW_HELPERS.NONE)
 
   // Animation: frames state
   const [frames, setFrames] = useState([
@@ -155,6 +156,10 @@ function App() {
   const [moveStart, setMoveStart] = useState(null)
   const [movePreview, setMovePreview] = useState(null)
 
+  const handleViewHelperToggle = useCallback((helper) => {
+    setViewHelper(prev => prev === helper ? VIEW_HELPERS.NONE : helper)
+  }, [])
+
   // For useCanvas, pass showOnionSkin and previous frame's layers (if any)
   const previousLayers = activeFrame > 0 ? frames[activeFrame - 1].layers : null
   const activeLayerPreview = movePreview && (movePreview.dx !== 0 || movePreview.dy !== 0)
@@ -175,6 +180,7 @@ function App() {
     circlePreview,
     toolOptions,
     settings,
+    viewHelper,
     showOnionSkin,
     previousLayers,
     activeLayerPreview
@@ -811,6 +817,8 @@ function App() {
             onToolSelect={setCurrentTool}
             toolOptions={toolOptions}
             onToolOptionsChange={handleToolOptionsChange}
+            viewHelper={viewHelper}
+            onViewHelperChange={handleViewHelperToggle}
           />
           <div className="w-56">
             <ColorPicker
@@ -832,6 +840,7 @@ function App() {
               onMouseLeave={handleMouseLeave}
               onWheel={handleWheel}
               settings={settings}
+              viewHelper={viewHelper}
             />
           </div>
           {/* Timeline */}
