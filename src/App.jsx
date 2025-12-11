@@ -16,6 +16,9 @@ import Preview from './components/Preview'
 import { importPngToFrame } from './utils/importPng'
 import ImportModal from './components/ImportModal'
 import ExportModal from './components/ExportModal'
+import FlipFixLab from './components/FlipFixLab'
+import { SPRITE_VARIANTS } from './types/sprite'
+import { initializeSpriteState, framesToSpriteGridLayers, getFramesFromSpriteGridLayers, updateVariant } from './utils/spriteState'
 
 // Keyboard shortcuts mapping
 const KEYBOARD_SHORTCUTS = {
@@ -50,8 +53,8 @@ function App() {
   const [showOnionSkin, setShowOnionSkin] = useState(false)
   const [viewHelper, setViewHelper] = useState(VIEW_HELPERS.NONE)
 
-  // Animation: frames state
-  const [frames, setFrames] = useState([
+  // Sprite state with variants
+  const initialFrames = [
     {
       id: 1,
       name: 'Frame 1',
@@ -69,9 +72,45 @@ function App() {
       nextGroupId: 1,
       activeLayer: 0
     }
-  ])
-  const [activeFrame, setActiveFrame] = useState(0)
+  ]
+  const [spriteState, setSpriteState] = useState(() => 
+    initializeSpriteState(initialFrames, 0, DEFAULT_SETTINGS.gridWidth, DEFAULT_SETTINGS.gridHeight)
+  )
+  const [activeVariant, setActiveVariant] = useState(SPRITE_VARIANTS.ORIGINAL)
+  
+  // Mode: 'standard' or 'flipFix'
+  const [editMode, setEditMode] = useState('standard')
 
+  // Helper: get current variant's state
+  const currentVariantState = spriteState[activeVariant]
+  if (!currentVariantState) {
+    // This shouldn't happen, but handle gracefully
+    console.error(`Variant ${activeVariant} is null`)
+  }
+  
+  // Get frames from current variant (or fallback to original)
+  const frames = currentVariantState 
+    ? getFramesFromSpriteGridLayers(currentVariantState)
+    : getFramesFromSpriteGridLayers(spriteState.original)
+  
+  // Helper: get activeFrame from current variant
+  const activeFrame = currentVariantState?.activeFrame ?? 0
+  
+  // Helper: set activeFrame for current variant
+  const setActiveFrame = useCallback((frameIndex) => {
+    setSpriteState(prevState => {
+      const currentVariantState = prevState[activeVariant]
+      if (!currentVariantState) return prevState
+      
+      const updatedVariantState = {
+        ...currentVariantState,
+        activeFrame: frameIndex
+      }
+      
+      return updateVariant(prevState, activeVariant, updatedVariantState)
+    })
+  }, [activeVariant])
+  
   // Helper: get current frame
   const currentFrame = frames[activeFrame]
   const layers = currentFrame.layers
@@ -79,13 +118,23 @@ function App() {
   const nextGroupId = currentFrame.nextGroupId
   const layerIdCounter = currentFrame.layerIdCounter
 
-  // Add back handleFramesChange
+  // Update frames for the active variant
   const handleFramesChange = useCallback((updater) => {
-    setFrames(prevFrames => {
-      const nextFrames = typeof updater === 'function' ? updater(prevFrames) : updater
-      return nextFrames
+    setSpriteState(prevState => {
+      const currentVariantState = prevState[activeVariant]
+      if (!currentVariantState) return prevState
+      
+      const currentFrames = getFramesFromSpriteGridLayers(currentVariantState)
+      const nextFrames = typeof updater === 'function' ? updater(currentFrames) : updater
+      
+      const updatedVariantState = {
+        ...currentVariantState,
+        frames: nextFrames
+      }
+      
+      return updateVariant(prevState, activeVariant, updatedVariantState)
     })
-  }, [])
+  }, [activeVariant])
 
   const updateActiveFrame = useCallback((updater) => {
     handleFramesChange(prevFrames => prevFrames.map((frame, index) => {
@@ -150,6 +199,32 @@ function App() {
   // Update sprite size when grid size changes
   useEffect(() => {
     setSpriteSize({ width: settings.gridWidth, height: settings.gridHeight })
+    // Also update spriteState dimensions
+    setSpriteState(prevState => {
+      const updated = { ...prevState }
+      if (prevState.original) {
+        updated.original = {
+          ...prevState.original,
+          width: settings.gridWidth,
+          height: settings.gridHeight
+        }
+      }
+      if (prevState.flippedRaw) {
+        updated.flippedRaw = {
+          ...prevState.flippedRaw,
+          width: settings.gridWidth,
+          height: settings.gridHeight
+        }
+      }
+      if (prevState.flippedFixed) {
+        updated.flippedFixed = {
+          ...prevState.flippedFixed,
+          width: settings.gridWidth,
+          height: settings.gridHeight
+        }
+      }
+      return updated
+    })
   }, [settings.gridWidth, settings.gridHeight])
 
   // Track drag state for move tool
@@ -810,6 +885,41 @@ function App() {
           onSettings={() => setShowSettings(true)}
         />
       </div>
+      {/* Mode toggle */}
+      <div className="flex gap-2 p-2 border-b border-neutral-700 bg-neutral-800">
+        <button
+          onClick={() => setEditMode('standard')}
+          className={`px-4 py-2 rounded ${editMode === 'standard' ? 'bg-indigo-600' : 'bg-neutral-700'}`}
+        >
+          Standard Editor
+        </button>
+        <button
+          onClick={() => setEditMode('flipFix')}
+          className={`px-4 py-2 rounded ${editMode === 'flipFix' ? 'bg-indigo-600' : 'bg-neutral-700'}`}
+        >
+          Flip-Fix Lab
+        </button>
+      </div>
+      
+      {editMode === 'flipFix' ? (
+        <div className="flex-1 min-h-0">
+          <FlipFixLab
+            spriteState={spriteState}
+            setSpriteState={setSpriteState}
+            activeVariant={activeVariant}
+            setActiveVariant={setActiveVariant}
+            spriteSize={spriteSize}
+            settings={settings}
+            zoom={zoom}
+            pan={pan}
+            setPan={setPan}
+            leftColor={leftColor}
+            rightColor={rightColor}
+            toolOptions={toolOptions}
+            viewHelper={viewHelper}
+          />
+        </div>
+      ) : (
       <div className="flex-1 min-h-0 flex">
         <div className="flex-shrink-0 flex flex-col mt-4 ml-4 mb-4 bg-neutral-800 border-t border-neutral-700 rounded-lg">
           <Toolbar
@@ -890,6 +1000,7 @@ function App() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Settings Modal */}
       {showSettings && (
