@@ -302,6 +302,25 @@ const SettingsModal = ({ settings, onSettingsChange, onClose }) => {
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-neutral-300 mb-2">Zoom Speed</label>
+              <input
+                type="range"
+                min="5"
+                max="30"
+                step="1"
+                value={(localSettings.zoomSpeed || 0.15) * 100}
+                onChange={e => handleChange('zoomSpeed', parseInt(e.target.value) / 100)}
+                className="w-full accent-purple-500 bg-neutral-700 h-1 rounded-full"
+              />
+              <div className="flex justify-between text-xs text-neutral-400 mt-1">
+                <span>Slow (5%)</span>
+                <span>{Math.round((localSettings.zoomSpeed || 0.15) * 100)}%</span>
+                <span>Fast (30%)</span>
+              </div>
+              <p className="text-xs text-neutral-500 mt-1">Controls how fast the canvas zooms when using the scroll wheel</p>
+            </div>
+
+            <div>
               <label className="block text-sm font-medium text-neutral-300 mb-2">Visible Panels</label>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">

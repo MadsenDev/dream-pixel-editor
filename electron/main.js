@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import isDev from 'electron-is-dev';
@@ -16,13 +16,15 @@ function createWindow() {
     height: 900,
     minWidth: 800,
     minHeight: 600,
+    frame: false, // Remove default frame for custom titlebar
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
     },
     icon: join(__dirname, '../public/logo.png'),
-    titleBarStyle: 'default',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: false,
   });
 
   // Load the app
@@ -39,6 +41,38 @@ function createWindow() {
   // Emitted when the window is closed
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  // Handle window controls
+  ipcMain.handle('window:minimize', () => {
+    if (mainWindow) mainWindow.minimize();
+  });
+
+  ipcMain.handle('window:maximize', () => {
+    if (mainWindow) {
+      if (mainWindow.isMaximized()) {
+        mainWindow.unmaximize();
+      } else {
+        mainWindow.maximize();
+      }
+    }
+  });
+
+  ipcMain.handle('window:close', () => {
+    if (mainWindow) mainWindow.close();
+  });
+
+  ipcMain.handle('window:isMaximized', () => {
+    return mainWindow ? mainWindow.isMaximized() : false;
+  });
+
+  // Send window state changes to renderer
+  mainWindow.on('maximize', () => {
+    mainWindow.webContents.send('window:maximized');
+  });
+
+  mainWindow.on('unmaximize', () => {
+    mainWindow.webContents.send('window:unmaximized');
   });
 }
 

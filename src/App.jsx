@@ -1,15 +1,22 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Toolbar from './components/Toolbar'
+import ToolOptionsPanel from './components/ToolOptionsPanel'
+import ZoomControls from './components/ZoomControls'
 import ColorPicker from './components/ColorPicker'
 import SettingsModal from './components/SettingsModal'
 import Header from './components/Header'
+import TitleBar from './components/TitleBar'
+import MenuBar from './components/MenuBar'
 import LoadingScreen from './components/LoadingScreen'
 import { FaCog } from 'react-icons/fa'
-import { TOOLS, DEFAULT_SETTINGS, DEFAULT_TOOL_OPTIONS, DEFAULT_COLORS, VIEW_HELPERS } from './constants'
+import { TOOLS, DEFAULT_SETTINGS, DEFAULT_TOOL_OPTIONS, DEFAULT_VIEW_HELPER_OPTIONS, DEFAULT_COLORS, VIEW_HELPERS, PIXEL_SIZE } from './constants'
 import { useDrawing } from './hooks/useDrawing'
-import { useCanvas } from './hooks/useCanvas'
+import { useCanvas, guideHandlesRef } from './hooks/useCanvas'
 import Canvas from './components/Canvas'
 import { useToolShortcuts } from './hooks/useToolShortcuts'
+import { useHistory } from './hooks/useHistory'
+import { useZoom } from './hooks/useZoom'
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import LayersPanel from './components/LayersPanel'
 import Timeline from './components/Timeline'
 import Preview from './components/Preview'
@@ -19,6 +26,9 @@ import ExportModal from './components/ExportModal'
 import FlipFixLab from './components/FlipFixLab'
 import { SPRITE_VARIANTS } from './types/sprite'
 import { initializeSpriteState, framesToSpriteGridLayers, getFramesFromSpriteGridLayers, updateVariant } from './utils/spriteState'
+import { createEmptyFrame, duplicateFrame, calculateNewActiveFrameAfterDelete, reorderFrames } from './utils/frameUtils'
+import { createEmptyLayer, duplicateLayer, calculateNewActiveLayerAfterDelete, moveLayer, mergeLayers } from './utils/layerUtils'
+import { exportSprites } from './utils/exportUtils'
 
 // Keyboard shortcuts mapping
 const KEYBOARD_SHORTCUTS = {
@@ -37,14 +47,14 @@ function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [selectedTile, setSelectedTile] = useState(null)
   const [spriteSize, setSpriteSize] = useState({ width: DEFAULT_SETTINGS.gridWidth, height: DEFAULT_SETTINGS.gridHeight })
-  const [zoom, setZoom] = useState(1)
-  const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [isPanning, setIsPanning] = useState(false)
-  const [lastPanPosition, setLastPanPosition] = useState({ x: 0, y: 0 })
   const [currentTool, setCurrentTool] = useState(TOOLS.PENCIL)
   const [leftColor, setLeftColor] = useState(DEFAULT_COLORS[0])
   const [rightColor, setRightColor] = useState(DEFAULT_COLORS[1])
   const [toolOptions, setToolOptions] = useState(DEFAULT_TOOL_OPTIONS)
+  const [viewHelperOptions, setViewHelperOptions] = useState(() => ({
+    ...DEFAULT_VIEW_HELPER_OPTIONS,
+    sideViewGuides: { ...DEFAULT_VIEW_HELPER_OPTIONS.sideViewGuides }
+  }))
   const [isImporting, setIsImporting] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
@@ -111,15 +121,21 @@ function App() {
     })
   }, [activeVariant])
   
-  // Helper: get current frame
-  const currentFrame = frames[activeFrame]
+  // Helper: get current frame (with safety check)
+  const currentFrame = frames[activeFrame] || frames[0] || null
+  if (!currentFrame) {
+    // Fallback if no frames exist
+    return <div className="w-screen h-screen bg-neutral-900 text-white flex items-center justify-center">
+      <div>No frames available</div>
+    </div>
+  }
   const layers = currentFrame.layers
   const activeLayer = currentFrame.activeLayer
   const nextGroupId = currentFrame.nextGroupId
   const layerIdCounter = currentFrame.layerIdCounter
 
   // Update frames for the active variant
-  const handleFramesChange = useCallback((updater) => {
+  const handleFramesChange = useCallback((updater, newActiveFrame = null) => {
     setSpriteState(prevState => {
       const currentVariantState = prevState[activeVariant]
       if (!currentVariantState) return prevState
@@ -127,9 +143,20 @@ function App() {
       const currentFrames = getFramesFromSpriteGridLayers(currentVariantState)
       const nextFrames = typeof updater === 'function' ? updater(currentFrames) : updater
       
+      // Ensure activeFrame is valid
+      let updatedActiveFrame = newActiveFrame !== null 
+        ? newActiveFrame 
+        : currentVariantState.activeFrame
+      
+      // Clamp activeFrame to valid range
+      if (updatedActiveFrame >= nextFrames.length) {
+        updatedActiveFrame = Math.max(0, nextFrames.length - 1)
+      }
+      
       const updatedVariantState = {
         ...currentVariantState,
-        frames: nextFrames
+        frames: nextFrames,
+        activeFrame: updatedActiveFrame
       }
       
       return updateVariant(prevState, activeVariant, updatedVariantState)
@@ -163,6 +190,24 @@ function App() {
     })
   }, [updateActiveFrame])
 
+  // Zoom and pan hook (must be called before useDrawing to get canvasRef)
+  const {
+    zoom,
+    pan,
+    setPan,
+    isPanning,
+    canvasRef: zoomCanvasRef,
+    handleZoomIn,
+    handleZoomOut,
+    handleZoomReset,
+    handleZoomToFit,
+    handleZoomTo100,
+    handleWheel,
+    handlePanStart,
+    handlePanMove,
+    handlePanEnd
+  } = useZoom(spriteSize, settings.zoomSpeed)
+
   // Drawing hook
   const {
     isDrawing,
@@ -179,7 +224,7 @@ function App() {
     setCircleStart,
     circlePreview,
     setCirclePreview,
-    canvasRef,
+    canvasRef: drawingCanvasRef,
     paintPixel,
     floodFill,
     drawLine,
@@ -195,6 +240,15 @@ function App() {
     updateActiveFrameLayers,
     activeLayer
   )
+  
+  // Use zoom canvas ref (share the same ref)
+  const canvasRef = zoomCanvasRef
+  // Sync the drawing canvas ref to the zoom canvas ref
+  useEffect(() => {
+    if (drawingCanvasRef && zoomCanvasRef) {
+      drawingCanvasRef.current = zoomCanvasRef.current
+    }
+  }, [drawingCanvasRef, zoomCanvasRef])
 
   // Update sprite size when grid size changes
   useEffect(() => {
@@ -229,7 +283,21 @@ function App() {
 
   // Track drag state for move tool
   const [moveStart, setMoveStart] = useState(null)
+  const [moveStartPixelCoords, setMoveStartPixelCoords] = useState(null)
   const [movePreview, setMovePreview] = useState(null)
+  
+  // Track drag state for guide handles
+  const [draggingGuide, setDraggingGuide] = useState(null)
+  const [guideDragStartY, setGuideDragStartY] = useState(null)
+  
+  // History hook
+  const {
+    saveToHistory,
+    handleUndo,
+    handleRedo,
+    canUndo,
+    canRedo
+  } = useHistory(frames, handleFramesChange)
 
   const handleViewHelperToggle = useCallback((helper) => {
     setViewHelper(prev => prev === helper ? VIEW_HELPERS.NONE : helper)
@@ -258,7 +326,8 @@ function App() {
     viewHelper,
     showOnionSkin,
     previousLayers,
-    activeLayerPreview
+    activeLayerPreview,
+    viewHelperOptions
   )
 
   // Use the custom hook for keyboard shortcuts
@@ -285,18 +354,69 @@ function App() {
   }, [])
 
   const handleMouseDown = (e) => {
+    // Check if clicking on a guide handle (only when side view helper is active)
+    if (viewHelper === VIEW_HELPERS.SIDE && viewHelperOptions?.showHeightGuides !== false && canvasRef?.current) {
+      const canvas = canvasRef.current
+      const rect = canvas.getBoundingClientRect()
+      const mouseX = e.clientX - rect.left
+      const mouseY = e.clientY - rect.top
+      
+      // Calculate current scale and offset to match what's in useCanvas
+      const displayWidth = canvas.clientWidth
+      const displayHeight = canvas.clientHeight
+      const scaleX = displayWidth / (spriteSize.width * PIXEL_SIZE)
+      const scaleY = displayHeight / (spriteSize.height * PIXEL_SIZE)
+      const currentScale = Math.min(scaleX, scaleY) * zoom
+      const currentOffsetX = (displayWidth - spriteSize.width * PIXEL_SIZE * currentScale) / 2 + pan.x
+      const currentOffsetY = (displayHeight - spriteSize.height * PIXEL_SIZE * currentScale) / 2 + pan.y
+      
+      // Check if mouse is over any guide handle
+      // Only check handles that are to the right of the sprite (outside the drawing area)
+      if (guideHandlesRef.current && guideHandlesRef.current.length > 0) {
+        for (const handle of guideHandlesRef.current) {
+          if (!handle.handleX || handle.handleX === undefined) continue
+          
+          // Recalculate screen position with current transform
+          // handleX and handleY are in sprite coordinates (pixels), need to convert to screen
+          const screenX = handle.handleX * currentScale + currentOffsetX
+          const screenY = handle.handleY * currentScale + currentOffsetY
+          const screenSize = (handle.handleSize || 12) * currentScale
+          
+          const dx = mouseX - screenX
+          const dy = mouseY - screenY
+          const distance = Math.sqrt(dx * dx + dy * dy)
+          const threshold = Math.max(screenSize / 2, 12) // Minimum threshold of 12 pixels for easier clicking
+          
+          // Only consider it a handle click if we're actually clicking to the right of the sprite
+          // This prevents blocking drawing when clicking inside the sprite area
+          const spriteRightEdge = (spriteSize.width * PIXEL_SIZE) * currentScale + currentOffsetX
+          if (mouseX > spriteRightEdge && distance <= threshold) {
+            // Start dragging this guide
+            setDraggingGuide(handle.key)
+            setGuideDragStartY(mouseY)
+            e.preventDefault()
+            e.stopPropagation()
+            return
+          }
+        }
+      }
+    }
+    
     if (currentTool === TOOLS.PAN) {
-      setIsPanning(true)
-      setLastPanPosition({ x: e.clientX, y: e.clientY })
+      handlePanStart(e)
       return
     }
     if (currentTool === TOOLS.MOVE_LAYER_CONTENT) {
+      const pixelCoords = getPixelCoordinates(e, pan, zoom, canvasRef)
       setMoveStart({ x: e.clientX, y: e.clientY })
+      setMoveStartPixelCoords(pixelCoords)
       setMovePreview({ dx: 0, dy: 0 })
+      // Save state before moving
+      saveToHistory(frames)
       return
     }
 
-    const { x, y } = getPixelCoordinates(e, pan, zoom)
+    const { x, y } = getPixelCoordinates(e, pan, zoom, canvasRef)
     const color = e.button === 2 ? rightColor : leftColor
 
     switch (currentTool) {
@@ -350,23 +470,98 @@ function App() {
   }
 
   const handleMouseMove = (e) => {
-    if (currentTool === TOOLS.PAN && isPanning) {
-      const dx = e.clientX - lastPanPosition.x
-      const dy = e.clientY - lastPanPosition.y
-      setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }))
-      setLastPanPosition({ x: e.clientX, y: e.clientY })
+    // Handle guide dragging
+    if (draggingGuide !== null) {
+      const canvas = canvasRef?.current
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect()
+        const mouseY = e.clientY - rect.top
+        
+        // Calculate scale and offset (same as in useCanvas)
+        const displayWidth = canvas.clientWidth
+        const displayHeight = canvas.clientHeight
+        const scaleX = displayWidth / (spriteSize.width * PIXEL_SIZE)
+        const scaleY = displayHeight / (spriteSize.height * PIXEL_SIZE)
+        const scale = Math.min(scaleX, scaleY) * zoom
+        const offsetY = (displayHeight - spriteSize.height * PIXEL_SIZE * scale) / 2 + pan.y
+        
+        // Convert mouse Y to sprite Y coordinate
+        const spriteY = (mouseY - offsetY) / scale
+        const pixelRow = Math.max(0, Math.min(spriteSize.height - 1, Math.floor(spriteY / PIXEL_SIZE)))
+        const newPosition = pixelRow / spriteSize.height
+        const clampedPosition = pixelRow === spriteSize.height - 1 ? 1.0 : newPosition
+        
+        // Update guide position
+        const newGuides = {
+          ...viewHelperOptions.sideViewGuides,
+          [draggingGuide]: clampedPosition
+        }
+        setViewHelperOptions({
+          ...viewHelperOptions,
+          sideViewGuides: newGuides
+        })
+      }
       return
     }
-    if (currentTool === TOOLS.MOVE_LAYER_CONTENT && moveStart) {
-      const dx = Math.round((e.clientX - moveStart.x) / (zoom * settings.defaultPixelSize))
-      const dy = Math.round((e.clientY - moveStart.y) / (zoom * settings.defaultPixelSize))
+    
+    // Check if hovering over a guide handle (for cursor change)
+    if (viewHelper === VIEW_HELPERS.SIDE && viewHelperOptions?.showHeightGuides !== false && canvasRef?.current && !draggingGuide) {
+      const canvas = canvasRef.current
+      const rect = canvas.getBoundingClientRect()
+      const mouseX = e.clientX - rect.left
+      const mouseY = e.clientY - rect.top
+      
+      // Calculate current scale and offset to match what's in useCanvas
+      const displayWidth = canvas.clientWidth
+      const displayHeight = canvas.clientHeight
+      const scaleX = displayWidth / (spriteSize.width * PIXEL_SIZE)
+      const scaleY = displayHeight / (spriteSize.height * PIXEL_SIZE)
+      const currentScale = Math.min(scaleX, scaleY) * zoom
+      const currentOffsetX = (displayWidth - spriteSize.width * PIXEL_SIZE * currentScale) / 2 + pan.x
+      const currentOffsetY = (displayHeight - spriteSize.height * PIXEL_SIZE * currentScale) / 2 + pan.y
+      
+      let hoveringHandle = false
+      if (guideHandlesRef.current && guideHandlesRef.current.length > 0) {
+        for (const handle of guideHandlesRef.current) {
+          // Recalculate screen position with current transform
+          const screenX = handle.handleX * currentScale + currentOffsetX
+          const screenY = handle.handleY * currentScale + currentOffsetY
+          const screenSize = (handle.handleSize || 12) * currentScale
+          
+          const dx = mouseX - screenX
+          const dy = mouseY - screenY
+          const distance = Math.sqrt(dx * dx + dy * dy)
+          const threshold = Math.max(screenSize / 2, 8) // Minimum threshold of 8 pixels
+          
+          if (distance <= threshold) {
+            hoveringHandle = true
+            break
+          }
+        }
+      }
+      
+      if (hoveringHandle) {
+        canvas.style.cursor = 'ns-resize'
+      } else if (currentTool !== TOOLS.PAN) {
+        canvas.style.cursor = 'default'
+      }
+    }
+    
+    if (currentTool === TOOLS.PAN && isPanning) {
+      handlePanMove(e)
+      return
+    }
+    if (currentTool === TOOLS.MOVE_LAYER_CONTENT && moveStart && moveStartPixelCoords) {
+      const currentPixelCoords = getPixelCoordinates(e, pan, zoom, canvasRef)
+      const dx = currentPixelCoords.x - moveStartPixelCoords.x
+      const dy = currentPixelCoords.y - moveStartPixelCoords.y
       if (!movePreview || movePreview.dx !== dx || movePreview.dy !== dy) {
         setMovePreview({ dx, dy })
       }
       return
     }
 
-    const { x, y } = getPixelCoordinates(e, pan, zoom)
+    const { x, y } = getPixelCoordinates(e, pan, zoom, canvasRef)
     const color = e.buttons === 2 ? rightColor : leftColor
 
     switch (currentTool) {
@@ -419,6 +614,13 @@ function App() {
   }
 
   const handleMouseUp = (e) => {
+    // Stop dragging guide
+    if (draggingGuide !== null) {
+      setDraggingGuide(null)
+      setGuideDragStartY(null)
+      return
+    }
+    
     if (currentTool === TOOLS.LINE && lineStart && linePreview) {
       drawLine(lineStart, linePreview, lineStart.color, toolOptions)
     }
@@ -428,16 +630,25 @@ function App() {
     if (currentTool === TOOLS.CIRCLE && circleStart && circlePreview) {
       drawCircle(circleStart, circlePreview, circleStart.color, toolOptions)
     }
-    if (currentTool === TOOLS.MOVE_LAYER_CONTENT && moveStart) {
-      const dx = movePreview ? movePreview.dx : Math.round((e.clientX - moveStart.x) / (zoom * settings.defaultPixelSize))
-      const dy = movePreview ? movePreview.dy : Math.round((e.clientY - moveStart.y) / (zoom * settings.defaultPixelSize))
+    if (currentTool === TOOLS.MOVE_LAYER_CONTENT && moveStart && moveStartPixelCoords) {
+      const currentPixelCoords = getPixelCoordinates(e, pan, zoom, canvasRef)
+      const dx = currentPixelCoords.x - moveStartPixelCoords.x
+      const dy = currentPixelCoords.y - moveStartPixelCoords.y
       if (dx !== 0 || dy !== 0) {
         updateLayerAt(activeLayer, layer => ({
           ...layer,
           pixels: shiftLayerPixels(layer.pixels, dx, dy)
         }))
+        // Save state after moving
+        setTimeout(() => {
+          handleFramesChange(prev => {
+            saveToHistory(prev)
+            return prev
+          })
+        }, 0)
       }
       setMoveStart(null)
+      setMoveStartPixelCoords(null)
       setMovePreview(null)
       return
     }
@@ -448,20 +659,17 @@ function App() {
     setCircleStart(null)
     setCirclePreview(null)
     setIsDrawing(false)
-    setIsPanning(false)
+    handlePanEnd()
   }
 
   const handleMouseLeave = () => {
     setIsDrawing(false)
-    setIsPanning(false)
+    handlePanEnd()
     setMoveStart(null)
+    setMoveStartPixelCoords(null)
     setMovePreview(null)
-  }
-
-  const handleWheel = (e) => {
-    e.preventDefault()
-    const delta = e.deltaY > 0 ? 0.9 : 1.1
-    setZoom(prev => Math.max(0.1, Math.min(10, prev * delta)))
+    setDraggingGuide(null)
+    setGuideDragStartY(null)
   }
 
   const handleColorSelect = (color, button) => {
@@ -496,14 +704,7 @@ function App() {
   const handleAddLayer = () => {
     updateActiveFrame(frame => {
       const nextId = frame.layerIdCounter + 1
-      const newLayer = {
-        id: nextId,
-        name: `Layer ${frame.layers.length + 1}`,
-        visible: true,
-        opacity: 1,
-        groupId: null,
-        pixels: Array(settings.gridHeight).fill(null).map(() => Array(settings.gridWidth).fill(null))
-      }
+      const newLayer = createEmptyLayer(nextId, `Layer ${frame.layers.length + 1}`, settings.gridWidth, settings.gridHeight)
       return {
         ...frame,
         layers: [...frame.layers, newLayer],
@@ -518,9 +719,7 @@ function App() {
     updateActiveFrame(frame => {
       if (frame.layers.length === 1) return frame
       const newLayers = frame.layers.filter((_, i) => i !== idx)
-      let newActive = frame.activeLayer
-      if (frame.activeLayer === idx) newActive = 0
-      else if (frame.activeLayer > idx) newActive = frame.activeLayer - 1
+      const newActive = calculateNewActiveLayerAfterDelete(idx, frame.activeLayer, frame.layers.length)
       return {
         ...frame,
         layers: newLayers,
@@ -542,21 +741,9 @@ function App() {
   // Handler: Move Layer (now accepts fromIdx, toIdx)
   const handleMoveLayer = (fromIdx, toIdxOrDirection) => {
     updateActiveFrame(frame => {
-      let layers = [...frame.layers]
-      let toIdx = toIdxOrDirection
-      if (typeof toIdxOrDirection === 'string') {
-        if (toIdxOrDirection === 'up' && fromIdx > 0) toIdx = fromIdx - 1
-        else if (toIdxOrDirection === 'down' && fromIdx < layers.length - 1) toIdx = fromIdx + 1
-        else return frame
-      }
-      if (fromIdx === toIdx || toIdx < 0 || toIdx >= layers.length) return frame
-      const [moved] = layers.splice(fromIdx, 1)
-      layers.splice(toIdx, 0, moved)
-      let newActive = frame.activeLayer
-      if (frame.activeLayer === fromIdx) newActive = toIdx
-      else if (fromIdx < frame.activeLayer && toIdx >= frame.activeLayer) newActive = frame.activeLayer - 1
-      else if (fromIdx > frame.activeLayer && toIdx <= frame.activeLayer) newActive = frame.activeLayer + 1
-      return { ...frame, layers, activeLayer: newActive }
+      const result = moveLayer(frame.layers, fromIdx, toIdxOrDirection, frame.activeLayer)
+      if (!result) return frame
+      return { ...frame, layers: result.newLayers, activeLayer: result.newActiveIndex }
     })
   }
 
@@ -564,12 +751,7 @@ function App() {
   const handleDuplicateLayer = (idx) => {
     updateActiveFrame(frame => {
       const nextId = frame.layerIdCounter + 1
-      const newLayer = {
-        ...frame.layers[idx],
-        id: nextId,
-        name: `${frame.layers[idx].name} (copy)`,
-        pixels: frame.layers[idx].pixels.map(row => [...row])
-      }
+      const newLayer = duplicateLayer(frame.layers[idx], nextId)
       return {
         ...frame,
         layers: [...frame.layers, newLayer],
@@ -614,32 +796,19 @@ function App() {
   // Handler: Merge Layers
   const handleMergeLayers = (indices) => {
     updateActiveFrame(frame => {
-      if (indices.length < 2) return frame
-      const newLayers = frame.layers.filter((_, i) => !indices.includes(i))
-      const mergedPixels = Array(settings.gridHeight).fill(null).map(() => Array(settings.gridWidth).fill(null))
-      indices.forEach(idx => {
-        const layer = frame.layers[idx]
-        for (let y = 0; y < settings.gridHeight; y++) {
-          for (let x = 0; x < settings.gridWidth; x++) {
-            if (layer.pixels[y][x]) {
-              mergedPixels[y][x] = layer.pixels[y][x]
-            }
-          }
-        }
-      })
-      const mergedLayer = {
-        id: frame.layerIdCounter + 1,
-        name: 'Merged Layer',
-        visible: true,
-        opacity: 1,
-        groupId: null,
-        pixels: mergedPixels
-      }
+      const result = mergeLayers(
+        frame.layers,
+        indices,
+        settings.gridWidth,
+        settings.gridHeight,
+        frame.layerIdCounter + 1
+      )
+      if (!result) return frame
       return {
         ...frame,
-        layers: [...newLayers, mergedLayer],
+        layers: [...result.remainingLayers, result.mergedLayer],
         layerIdCounter: frame.layerIdCounter + 1,
-        activeLayer: newLayers.length
+        activeLayer: result.remainingLayers.length
       }
     })
   }
@@ -656,15 +825,33 @@ function App() {
       if (e.key === 'ArrowDown') dy = 1
       if (dx !== 0 || dy !== 0) {
         e.preventDefault()
+        saveToHistory(frames)
         updateLayerAt(activeLayer, layer => ({
           ...layer,
           pixels: shiftLayerPixels(layer.pixels, dx, dy)
         }))
+        setTimeout(() => {
+          handleFramesChange(prev => {
+            saveToHistory(prev)
+            return prev
+          })
+        }, 0)
       }
     }
     window.addEventListener('keydown', handleArrow)
     return () => window.removeEventListener('keydown', handleArrow)
-  }, [currentTool, activeLayer, shiftLayerPixels, updateLayerAt])
+  }, [currentTool, activeLayer, shiftLayerPixels, updateLayerAt, frames, saveToHistory, handleFramesChange])
+  
+  // Keyboard shortcuts for undo/redo and zoom
+  useKeyboardShortcuts({
+    handleUndo,
+    handleRedo,
+    handleZoomIn,
+    handleZoomOut,
+    handleZoomReset,
+    handleZoomToFit,
+    handleZoomTo100
+  })
 
   // Export logic
   const handleExport = () => {
@@ -672,154 +859,45 @@ function App() {
   }
 
   const doExport = ({ mode, scale, framesPerRow, exportAllFrames }) => {
-    const width = spriteSize.width
-    const height = spriteSize.height
-    const framesToExport = exportAllFrames ? frames : [frames[activeFrame]]
-
-    if (mode === 'single') {
-      // Export single frame
-      const canvas = document.createElement('canvas')
-      canvas.width = width * scale
-      canvas.height = height * scale
-      const ctx = canvas.getContext('2d')
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-      // Composite all visible layers in order
-      framesToExport[0].layers.forEach(layer => {
-        if (!layer.visible) return
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            const color = layer.pixels[y][x]
-            if (color) {
-              // Parse rgba color
-              const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/)
-              if (rgba) {
-                const [_, r, g, b, a] = rgba
-                const alpha = layer.opacity * (a ? parseFloat(a) : 1)
-                ctx.globalAlpha = alpha
-                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`
-                ctx.fillRect(x * scale, y * scale, scale, scale)
-                ctx.globalAlpha = 1
-              }
-            }
-          }
-        }
-      })
-
-      // Download as PNG
-      canvas.toBlob(blob => {
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'pixel-art.png'
-        a.click()
-        URL.revokeObjectURL(url)
-      }, 'image/png')
-    } else {
-      // Export sprite sheet
-      const numFrames = framesToExport.length
-      const cols = Math.min(framesPerRow, numFrames)
-      const rows = Math.ceil(numFrames / cols)
-      const canvas = document.createElement('canvas')
-      canvas.width = width * cols * scale
-      canvas.height = height * rows * scale
-      const ctx = canvas.getContext('2d')
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-      // Draw each frame
-      framesToExport.forEach((frame, idx) => {
-        const col = idx % cols
-        const row = Math.floor(idx / cols)
-        const x = col * width * scale
-        const y = row * height * scale
-
-        // Composite all visible layers in order
-        frame.layers.forEach(layer => {
-          if (!layer.visible) return
-          for (let y2 = 0; y2 < height; y2++) {
-            for (let x2 = 0; x2 < width; x2++) {
-              const color = layer.pixels[y2][x2]
-              if (color) {
-                // Parse rgba color
-                const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/)
-                if (rgba) {
-                  const [_, r, g, b, a] = rgba
-                  const alpha = layer.opacity * (a ? parseFloat(a) : 1)
-                  ctx.globalAlpha = alpha
-                  ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`
-                  ctx.fillRect(x + x2 * scale, y + y2 * scale, scale, scale)
-                  ctx.globalAlpha = 1
-                }
-              }
-            }
-          }
-        })
-      })
-
-      // Download as PNG
-      canvas.toBlob(blob => {
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'sprite-sheet.png'
-        a.click()
-        URL.revokeObjectURL(url)
-      }, 'image/png')
-    }
-
+    exportSprites({
+      mode,
+      scale,
+      framesPerRow,
+      exportAllFrames,
+      frames,
+      activeFrame,
+      width: spriteSize.width,
+      height: spriteSize.height
+    })
     setShowExportModal(false)
   }
 
   // Frame handlers
   const handleAddFrame = () => {
     handleFramesChange(prev => {
-      const next = [
-        ...prev,
-        {
-          id: prev.length + 1,
-          name: `Frame ${prev.length + 1}`,
-          layers: [
-            {
-              id: 1,
-              name: 'Layer 1',
-              visible: true,
-              opacity: 1,
-              groupId: null,
-              pixels: Array(settings.gridHeight).fill(null).map(() => Array(settings.gridWidth).fill(null))
-            }
-          ],
-          layerIdCounter: 1,
-          nextGroupId: 1,
-          activeLayer: 0
-        }
-      ]
+      const newFrame = createEmptyFrame(prev.length + 1, `Frame ${prev.length + 1}`, settings.gridWidth, settings.gridHeight)
+      const next = [...prev, newFrame]
       setActiveFrame(next.length - 1)
       return next
     })
   }
   const handleDeleteFrame = (idx) => {
     if (frames.length === 1) return
+    
+    // Calculate new active frame index before deletion
+    const newActive = Math.max(0, Math.min(
+      calculateNewActiveFrameAfterDelete(idx, activeFrame, frames.length),
+      frames.length - 2
+    ))
+    
+    // Delete the frame and update activeFrame in one operation
     handleFramesChange(prev => {
-      const next = prev.filter((_, i) => i !== idx)
-      const newActive = activeFrame === idx ? 0 : activeFrame > idx ? activeFrame - 1 : activeFrame
-      setActiveFrame(newActive)
-      return next
-    })
+      return prev.filter((_, i) => i !== idx)
+    }, newActive)
   }
   const handleDuplicateFrame = (idx) => {
     handleFramesChange(prev => {
-      const duplicated = {
-        ...prev[idx],
-        id: prev.length + 1,
-        name: `${prev[idx].name} (copy)`,
-        layers: prev[idx].layers.map(layer => ({
-          ...layer,
-          pixels: layer.pixels.map(row => [...row])
-        })),
-        layerIdCounter: prev[idx].layerIdCounter,
-        nextGroupId: prev[idx].nextGroupId,
-        activeLayer: prev[idx].activeLayer
-      }
+      const duplicated = duplicateFrame(prev[idx], prev.length + 1)
       const next = [...prev, duplicated]
       setActiveFrame(next.length - 1)
       return next
@@ -827,6 +905,15 @@ function App() {
   }
   const handleSelectFrame = (idx) => setActiveFrame(idx)
   const handleToggleOnionSkin = () => setShowOnionSkin(v => !v)
+  
+  // Handler: Reorder frames
+  const handleReorderFrames = useCallback((fromIndex, toIndex) => {
+    handleFramesChange(prev => {
+      const { newFrames, newActiveIndex } = reorderFrames(prev, fromIndex, toIndex, activeFrame)
+      setActiveFrame(newActiveIndex)
+      return newFrames
+    })
+  }, [activeFrame, handleFramesChange])
   // Render a simple thumbnail (just a colored box for now)
   const renderFrameThumbnail = (frame) => (
     <div className="w-full h-full flex items-center justify-center bg-neutral-700 rounded">
@@ -878,28 +965,44 @@ function App() {
 
   return (
     <div className="w-screen h-screen bg-neutral-900 text-white overflow-hidden flex flex-col">
+      <TitleBar />
+      <MenuBar
+        onImport={() => setIsImporting(true)}
+        onExport={() => setShowExportModal(true)}
+        onSettings={() => setShowSettings(true)}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        editMode={editMode}
+        onEditModeChange={setEditMode}
+      />
       <div className="flex-shrink-0">
         <Header
           onImport={() => setIsImporting(true)}
           onExport={() => setShowExportModal(true)}
           onSettings={() => setShowSettings(true)}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          editMode={editMode}
+          onEditModeChange={setEditMode}
         />
       </div>
-      {/* Mode toggle */}
-      <div className="flex gap-2 p-2 border-b border-neutral-700 bg-neutral-800">
-        <button
-          onClick={() => setEditMode('standard')}
-          className={`px-4 py-2 rounded ${editMode === 'standard' ? 'bg-indigo-600' : 'bg-neutral-700'}`}
-        >
-          Standard Editor
-        </button>
-        <button
-          onClick={() => setEditMode('flipFix')}
-          className={`px-4 py-2 rounded ${editMode === 'flipFix' ? 'bg-indigo-600' : 'bg-neutral-700'}`}
-        >
-          Flip-Fix Lab
-        </button>
-      </div>
+      {/* Tool Options Section - Only show in standard mode */}
+      {editMode === 'standard' && (
+        <div className="flex-shrink-0 border-b border-neutral-700 bg-neutral-800">
+          <ToolOptionsPanel
+            currentTool={currentTool}
+            toolOptions={toolOptions}
+            onToolOptionsChange={handleToolOptionsChange}
+            viewHelper={viewHelper}
+            viewHelperOptions={viewHelperOptions}
+            onViewHelperOptionsChange={setViewHelperOptions}
+          />
+        </div>
+      )}
       
       {editMode === 'flipFix' ? (
         <div className="flex-1 min-h-0">
@@ -915,6 +1018,7 @@ function App() {
             setPan={setPan}
             leftColor={leftColor}
             rightColor={rightColor}
+            onColorSelect={handleColorSelect}
             toolOptions={toolOptions}
             viewHelper={viewHelper}
           />
@@ -935,9 +1039,17 @@ function App() {
               onColorSelect={handleColorSelect}
               leftColor={leftColor}
               rightColor={rightColor}
-              layers={layers}
+              frames={frames}
             />
           </div>
+          <ZoomControls
+            zoom={zoom}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onZoomReset={handleZoomReset}
+            onZoomToFit={handleZoomToFit}
+            onZoomTo100={handleZoomTo100}
+          />
         </div>
         {/* Canvas Area */}
         <div className="flex-1 flex flex-col min-h-0">
@@ -962,6 +1074,7 @@ function App() {
               onAddFrame={handleAddFrame}
               onDeleteFrame={handleDeleteFrame}
               onDuplicateFrame={handleDuplicateFrame}
+              onReorderFrames={handleReorderFrames}
               showOnionSkin={showOnionSkin}
               onToggleOnionSkin={handleToggleOnionSkin}
               spriteSize={spriteSize}

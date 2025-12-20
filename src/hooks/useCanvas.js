@@ -1,6 +1,257 @@
 import { useEffect, useRef, useMemo } from 'react'
 import { PIXEL_SIZE, VIEW_HELPERS } from '../constants'
 
+// Global ref to store guide handles for hit testing
+export const guideHandlesRef = { current: [] }
+
+/**
+ * Draw view helper overlay based on the active helper type
+ */
+function drawViewHelperOverlay(ctx, spriteSize, scale, offsetX, offsetY, viewHelper, settings, viewHelperOptions = {}) {
+  if (!viewHelper || viewHelper === VIEW_HELPERS.NONE) return
+
+  const { width, height } = spriteSize
+  const fullWidth = width * PIXEL_SIZE
+  const fullHeight = height * PIXEL_SIZE
+  const opacity = viewHelperOptions.overlayOpacity ?? 0.4
+
+  ctx.save()
+  // Note: We're already in transformed coordinates (scale applied via setTransform)
+  // So we use sprite coordinates (0 to fullWidth/fullHeight) and line width is in sprite space
+  ctx.lineWidth = 1
+
+  switch (viewHelper) {
+    case VIEW_HELPERS.TOP_DOWN: {
+      // Major grid every N tiles
+      const majorGridEvery = viewHelperOptions.majorGridEvery ?? 4
+      ctx.strokeStyle = `rgba(80, 200, 255, ${opacity})`
+      
+      // Draw major vertical grid lines (in sprite coordinates)
+      for (let x = 0; x <= width; x += majorGridEvery) {
+        const px = x * PIXEL_SIZE
+        ctx.beginPath()
+        ctx.moveTo(px, 0)
+        ctx.lineTo(px, fullHeight)
+        ctx.stroke()
+      }
+      
+      // Draw major horizontal grid lines (in sprite coordinates)
+      for (let y = 0; y <= height; y += majorGridEvery) {
+        const py = y * PIXEL_SIZE
+        ctx.beginPath()
+        ctx.moveTo(0, py)
+        ctx.lineTo(fullWidth, py)
+        ctx.stroke()
+      }
+
+      // Center marker
+      if (viewHelperOptions.showCenterMarker !== false) {
+        const cx = fullWidth / 2
+        const cy = fullHeight / 2
+        ctx.fillStyle = `rgba(80, 200, 255, ${opacity + 0.3})`
+        ctx.fillRect(cx - 2, cy - 2, 4, 4)
+        
+        // Center crosshair
+        ctx.strokeStyle = `rgba(80, 200, 255, ${opacity + 0.2})`
+        const crosshairSize = Math.min(fullWidth, fullHeight) * 0.3
+        ctx.beginPath()
+        ctx.moveTo(cx - crosshairSize / 2, cy)
+        ctx.lineTo(cx + crosshairSize / 2, cy)
+        ctx.moveTo(cx, cy - crosshairSize / 2)
+        ctx.lineTo(cx, cy + crosshairSize / 2)
+        ctx.stroke()
+      }
+
+      // Compass/North arrow
+      if (viewHelperOptions.showCompass !== false) {
+        const compassSize = 20
+        const compassX = fullWidth - compassSize * 2
+        const compassY = compassSize * 2
+        
+        ctx.fillStyle = `rgba(80, 200, 255, ${opacity + 0.3})`
+        ctx.strokeStyle = `rgba(80, 200, 255, ${opacity + 0.5})`
+        
+        // Draw N arrow pointing up
+        ctx.beginPath()
+        ctx.moveTo(compassX, compassY - compassSize)
+        ctx.lineTo(compassX - compassSize * 0.5, compassY)
+        ctx.lineTo(compassX + compassSize * 0.5, compassY)
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+        
+        // Draw "N" text
+        ctx.font = '12px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillStyle = `rgba(80, 200, 255, ${opacity + 0.5})`
+        ctx.fillText('N', compassX, compassY + compassSize * 0.7)
+      }
+      break
+    }
+
+    case VIEW_HELPERS.SIDE: {
+      // Ground line at bottom row
+      if (viewHelperOptions.showGroundLine !== false) {
+        const groundY = fullHeight - PIXEL_SIZE
+        ctx.strokeStyle = `rgba(255, 210, 80, ${opacity + 0.1})`
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(0, groundY)
+        ctx.lineTo(fullWidth, groundY)
+        ctx.stroke()
+      }
+
+      // Height guides
+      if (viewHelperOptions?.showHeightGuides !== false) {
+        ctx.strokeStyle = `rgba(255, 210, 80, ${opacity * 0.5})`
+        ctx.lineWidth = 1
+        // Use custom guide positions from options, or defaults
+        const guidePositions = viewHelperOptions?.sideViewGuides || {
+          head: 0.1,
+          shoulder: 0.25,
+          hip: 0.5,
+          knee: 0.75,
+          feet: 1.0
+        }
+        
+        const guides = [
+          { y: guidePositions.head, label: 'Head' },
+          { y: guidePositions.shoulder, label: 'Shoulder' },
+          { y: guidePositions.hip, label: 'Hip' },
+          { y: guidePositions.knee, label: 'Knee' },
+          { y: guidePositions.feet, label: 'Feet' }
+        ]
+        
+        // Store guide positions for hit testing
+        const guideHandles = []
+        
+        guides.forEach(({ y, label }, index) => {
+          // Clamp y to valid range and convert percentage to pixel row
+          const clampedY = Math.max(0, Math.min(1, y))
+          const pixelY = clampedY === 1.0 ? (height - 1) : Math.floor(clampedY * height)
+          const guideY = pixelY * PIXEL_SIZE
+          
+          ctx.beginPath()
+          ctx.moveTo(0, guideY)
+          ctx.lineTo(fullWidth, guideY)
+          ctx.stroke()
+          
+          // Draw draggable handle to the right of the sprite
+          const handleX = fullWidth + 10 // 10px to the right of sprite
+          const handleY = guideY
+          const handleSize = 12
+          
+          // Draw handle
+          ctx.fillStyle = `rgba(255, 210, 80, ${opacity + 0.3})`
+          ctx.strokeStyle = `rgba(255, 210, 80, ${opacity + 0.7})`
+          ctx.lineWidth = 2
+          ctx.fillRect(handleX - handleSize / 2, handleY - handleSize / 2, handleSize, handleSize)
+          ctx.strokeRect(handleX - handleSize / 2, handleY - handleSize / 2, handleSize, handleSize)
+          
+          // Draw label on handle
+          ctx.font = '9px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillStyle = `rgba(0, 0, 0, 0.8)`
+          ctx.fillText(label[0].toUpperCase(), handleX, handleY)
+          
+          // Store handle info for hit testing (in sprite coordinates)
+          guideHandles.push({
+            label,
+            key: ['head', 'shoulder', 'hip', 'knee', 'feet'][index],
+            handleX, // In sprite coordinates
+            handleY, // In sprite coordinates
+            handleSize,
+            pixelY,
+            guideY
+          })
+        })
+        
+        // Store handles for hit testing (convert to screen coordinates)
+        // Note: handleX and handleY are in sprite coordinates (0 to fullWidth/fullHeight)
+        // After the transform (scale, offsetX, offsetY), they become screen coordinates
+        guideHandlesRef.current = guideHandles.map(handle => ({
+          ...handle,
+          screenX: handle.handleX * scale + offsetX,
+          screenY: handle.handleY * scale + offsetY,
+          screenSize: handle.handleSize * scale
+        }))
+      }
+
+      // Hitbox rectangle
+      if (viewHelperOptions.showHitbox !== false) {
+        ctx.strokeStyle = `rgba(255, 255, 255, ${opacity * 0.5})`
+        ctx.lineWidth = 1
+        const boxWidth = Math.floor(width * 0.6) * PIXEL_SIZE
+        const boxHeight = Math.floor(height * 0.9) * PIXEL_SIZE
+        const boxX = (fullWidth - boxWidth) / 2
+        const boxY = fullHeight - boxHeight
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight)
+      }
+      break
+    }
+
+    case VIEW_HELPERS.ISOMETRIC: {
+      const isoTileW = (viewHelperOptions.isoTileWidth ?? 16) * PIXEL_SIZE
+      const isoTileH = (viewHelperOptions.isoTileHeight ?? 8) * PIXEL_SIZE
+      
+      ctx.strokeStyle = `rgba(120, 200, 255, ${opacity})`
+      ctx.lineWidth = 1
+
+      // Calculate how many tiles to draw
+      const cols = Math.ceil(width / 2)
+      const rows = Math.ceil(height / 2)
+      
+      // Draw diamond grid (in sprite coordinates)
+      for (let y = -rows; y <= rows; y++) {
+        for (let x = -cols; x <= cols; x++) {
+          // Isometric projection: 2:1 ratio
+          const centerX = fullWidth / 2 + (x - y) * (isoTileW / 2)
+          const centerY = fullHeight / 2 + (x + y) * (isoTileH / 2)
+          
+          // Only draw if within visible bounds
+          if (centerX < -isoTileW || centerX > fullWidth + isoTileW) continue
+          if (centerY < -isoTileH || centerY > fullHeight + isoTileH) continue
+          
+          // Diamond corners
+          const top = { x: centerX, y: centerY - isoTileH / 2 }
+          const right = { x: centerX + isoTileW / 2, y: centerY }
+          const bottom = { x: centerX, y: centerY + isoTileH / 2 }
+          const left = { x: centerX - isoTileW / 2, y: centerY }
+          
+          ctx.beginPath()
+          ctx.moveTo(top.x, top.y)
+          ctx.lineTo(right.x, right.y)
+          ctx.lineTo(bottom.x, bottom.y)
+          ctx.lineTo(left.x, left.y)
+          ctx.closePath()
+          ctx.stroke()
+        }
+      }
+
+      // Highlight center tile
+      const centerX = fullWidth / 2
+      const centerY = fullHeight / 2
+      ctx.fillStyle = `rgba(120, 200, 255, ${opacity * 0.2})`
+      ctx.beginPath()
+      ctx.moveTo(centerX, centerY - isoTileH / 2)
+      ctx.lineTo(centerX + isoTileW / 2, centerY)
+      ctx.lineTo(centerX, centerY + isoTileH / 2)
+      ctx.lineTo(centerX - isoTileW / 2, centerY)
+      ctx.closePath()
+      ctx.fill()
+      ctx.stroke()
+      break
+    }
+
+    default:
+      break
+  }
+
+  ctx.restore()
+}
+
 export const useCanvas = (
   canvasRef,
   spriteSize,
@@ -18,7 +269,8 @@ export const useCanvas = (
   viewHelper = VIEW_HELPERS.NONE,
   showOnionSkin = false,
   previousLayers = null,
-  movePreview = null
+  movePreview = null,
+  viewHelperOptions = {}
 ) => {
   const frameRef = useRef(null)
   const prevLayersRef = useRef(layers)
@@ -42,9 +294,10 @@ export const useCanvas = (
       circleStart !== null ||
       circlePreview !== null ||
       movePreview !== null ||
-      viewHelper !== VIEW_HELPERS.NONE
+      viewHelper !== VIEW_HELPERS.NONE ||
+      (viewHelperOptions && JSON.stringify(viewHelperOptions) !== JSON.stringify(prevSettingsRef.current?.viewHelperOptions))
     )
-  }, [layers, pan, zoom, settings, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, movePreview, viewHelper])
+  }, [layers, pan, zoom, settings, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, movePreview, viewHelper, viewHelperOptions])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -105,96 +358,10 @@ export const useCanvas = (
         }
       }
 
-      const drawViewHelper = () => {
-        if (!viewHelper || viewHelper === VIEW_HELPERS.NONE) return
-
-        const helperStroke = settings.viewHelperColor || 'rgba(147, 197, 253, 0.55)'
-        const helperFill = settings.viewHelperAccentColor || 'rgba(59, 130, 246, 0.2)'
-        const fullWidth = spriteSize.width * PIXEL_SIZE
-        const fullHeight = spriteSize.height * PIXEL_SIZE
-        const midX = fullWidth / 2
-        const midY = fullHeight / 2
-        const axisLength = Math.min(fullWidth, fullHeight) * 0.65
-
-        ctx.save()
-        ctx.lineWidth = 1 / scale
-        ctx.strokeStyle = helperStroke
-        ctx.setLineDash([PIXEL_SIZE / 1.5, PIXEL_SIZE / 1.5])
-
-        switch (viewHelper) {
-          case VIEW_HELPERS.TOP_DOWN: {
-            ctx.beginPath()
-            ctx.moveTo(midX, 0)
-            ctx.lineTo(midX, fullHeight)
-            ctx.moveTo(0, midY)
-            ctx.lineTo(fullWidth, midY)
-            ctx.stroke()
-
-            ctx.setLineDash([])
-            ctx.fillStyle = helperFill
-            const highlightSpanX = Math.min(3, spriteSize.width)
-            const highlightSpanY = Math.min(3, spriteSize.height)
-            const centerTileX = Math.floor(spriteSize.width / 2)
-            const centerTileY = Math.floor(spriteSize.height / 2)
-            const startTileX = Math.max(0, Math.min(centerTileX - Math.floor(highlightSpanX / 2), spriteSize.width - highlightSpanX))
-            const startTileY = Math.max(0, Math.min(centerTileY - Math.floor(highlightSpanY / 2), spriteSize.height - highlightSpanY))
-            const highlightWidth = highlightSpanX * PIXEL_SIZE
-            const highlightHeight = highlightSpanY * PIXEL_SIZE
-            ctx.fillRect(startTileX * PIXEL_SIZE, startTileY * PIXEL_SIZE, highlightWidth, highlightHeight)
-            break
-          }
-          case VIEW_HELPERS.SIDE: {
-            ctx.beginPath()
-            const groundY = fullHeight - PIXEL_SIZE * 2
-            ctx.moveTo(0, groundY)
-            ctx.lineTo(fullWidth, groundY)
-            ctx.moveTo(midX, 0)
-            ctx.lineTo(midX, fullHeight)
-            ctx.stroke()
-
-            ctx.setLineDash([])
-            ctx.fillStyle = helperFill
-            const frontHeight = fullHeight * 0.5
-            const frontWidth = fullWidth * 0.2
-            ctx.fillRect(midX - frontWidth / 2, groundY - frontHeight, frontWidth, frontHeight)
-            break
-          }
-          case VIEW_HELPERS.ISOMETRIC: {
-            ctx.setLineDash([])
-            const verticalLength = axisLength
-            const diagLength = axisLength
-            const angle = Math.PI / 6 // 30 degrees
-
-            ctx.beginPath()
-            ctx.moveTo(midX, midY)
-            ctx.lineTo(midX, midY - verticalLength)
-            ctx.moveTo(midX, midY)
-            ctx.lineTo(midX + Math.cos(angle) * diagLength, midY + Math.sin(angle) * diagLength)
-            ctx.moveTo(midX, midY)
-            ctx.lineTo(midX - Math.cos(angle) * diagLength, midY + Math.sin(angle) * diagLength)
-            ctx.stroke()
-
-            ctx.fillStyle = helperFill
-            ctx.beginPath()
-            const diamondWidth = axisLength
-            const diamondHeight = axisLength * 0.6
-            ctx.moveTo(midX, midY - diamondHeight)
-            ctx.lineTo(midX + diamondWidth / 2, midY)
-            ctx.lineTo(midX, midY + diamondHeight)
-            ctx.lineTo(midX - diamondWidth / 2, midY)
-            ctx.closePath()
-            ctx.fill()
-            ctx.stroke()
-            break
-          }
-          default:
-            break
-        }
-
-        ctx.restore()
+      // Draw view helper overlay (after grid, before sprite)
+      if (viewHelper !== VIEW_HELPERS.NONE) {
+        drawViewHelperOverlay(ctx, spriteSize, scale, offsetX, offsetY, viewHelper, settings, viewHelperOptions)
       }
-
-      drawViewHelper()
 
       // Onion skin: draw previous frame's layers with low opacity
       if (showOnionSkin && previousLayers) {
@@ -408,7 +575,7 @@ export const useCanvas = (
       prevLayersRef.current = layers
       prevPanRef.current = pan
       prevZoomRef.current = zoom
-      prevSettingsRef.current = settings
+      prevSettingsRef.current = { ...settings, viewHelperOptions }
     }
 
     // Force initial draw
@@ -424,5 +591,5 @@ export const useCanvas = (
         cancelAnimationFrame(frameRef.current)
       }
     }
-  }, [canvasRef, spriteSize, layers, zoom, pan, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, toolOptions, settings, viewHelper, showOnionSkin, previousLayers, movePreview, shouldRedraw])
+  }, [canvasRef, spriteSize, layers, zoom, pan, lineStart, linePreview, rectStart, rectPreview, circleStart, circlePreview, toolOptions, settings, viewHelper, showOnionSkin, previousLayers, movePreview, viewHelperOptions, shouldRedraw])
 }

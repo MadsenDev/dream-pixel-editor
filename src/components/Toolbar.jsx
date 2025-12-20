@@ -214,13 +214,6 @@ const Toolbar = ({ currentTool, onToolSelect, toolOptions, onToolOptionsChange, 
           ))}
         </div>
 
-        {/* Tool Options */}
-        <ToolOptions
-          currentTool={currentTool}
-          toolOptions={toolOptions}
-          onToolOptionsChange={onToolOptionsChange}
-        />
-
         <ViewHelperSection
           viewHelper={viewHelper}
           onViewHelperChange={onViewHelperChange}

@@ -22,6 +22,7 @@ const Canvas = ({
       <div
         className="relative w-full h-full flex items-center justify-center"
         onWheel={onWheel}
+        style={{ touchAction: 'none' }}
       >
         <canvas
           ref={canvasRef}

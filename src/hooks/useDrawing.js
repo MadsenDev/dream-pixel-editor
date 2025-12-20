@@ -275,8 +275,12 @@ export const useDrawing = (spriteSize, settings, layers, setLayers, activeLayer)
     })
   }, [activeLayer, setLayers])
 
-  const getPixelCoordinates = useCallback((e, pan, zoom) => {
-    const canvas = canvasRef.current;
+  const getPixelCoordinates = useCallback((e, pan, zoom, externalCanvasRef = null) => {
+    // Use external canvas ref if provided, otherwise fall back to internal ref
+    const canvas = (externalCanvasRef?.current || canvasRef.current);
+    if (!canvas) {
+      return { x: 0, y: 0 };
+    }
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;

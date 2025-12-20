@@ -23,6 +23,7 @@ export default function FlipFixLab({
   setPan,
   leftColor,
   rightColor,
+  onColorSelect,
   toolOptions,
   viewHelper
 }) {
